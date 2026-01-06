@@ -14,7 +14,7 @@ dist/
 .vscode/
 .idea/
 
-# Output folders (ไม่เอาผลลัพธ์ขึ้น)
+# Output folders
 Result_*/
 
 # System files
