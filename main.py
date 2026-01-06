@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox
 from datetime import datetime
 
 # ==========================================
-# 📂 ส่วนเลือกไฟล์ (User Input UI)
+# 📂 User Input UI
 # ==========================================
 def get_video_source():
     root = tk.Tk()
@@ -29,12 +29,11 @@ def get_video_source():
 VIDEO_SOURCE = get_video_source()
 
 # ==========================================
-# 📁 สร้างโฟลเดอร์เก็บผลลัพธ์ (Universal Name)
+# 📁 Universal Name
 # ==========================================
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 if VIDEO_SOURCE is None:
-    # เปลี่ยนชื่อจาก 5-STS เป็น SitToStand_Analysis
     folder_name = f"SitToStand_Webcam_{timestamp}"
 else:
     base_name = os.path.basename(VIDEO_SOURCE).split('.')[0]
@@ -181,7 +180,7 @@ with mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7) as 
                 
                 if current_angle < 85 and stage == 'up':
                     stage = "down"
-                    counter += 1 # นับเพิ่มไปเรื่อยๆ ไม่มีหยุด
+                    counter += 1
                     if not current_rep_error: rep_quality_history.append(1) 
                     else: rep_quality_history.append(0) 
                     current_rep_error = False 
