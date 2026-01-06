@@ -132,7 +132,3 @@ This project is licensed under the MIT License - see the [LICENSE](https://www.g
 ### 📧 Contact
 
 Project Link: [https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer](https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer)
-
-```
-
-```
