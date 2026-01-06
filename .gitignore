@@ -1,0 +1,21 @@
+# Python caches
+__pycache__/
+
+# Virtual Environment
+venv/
+env/
+
+# PyInstaller (EXE build files)
+build/
+dist/
+*.spec
+
+# IDE settings
+.vscode/
+.idea/
+
+# Output folders (ไม่เอาผลลัพธ์ขึ้น)
+Result_*/
+
+# System files
+.DS_Store
