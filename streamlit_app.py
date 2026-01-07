@@ -1,10 +1,10 @@
 import os
 import sys
+import time
 
 # -------------------------------------------------------------------------
-# 🔧 FORCED CPU MODE: Force CPU usage 100% 
+# 🔧 FORCED CPU MODE: Force CPU usage 100%
 # (Crucial for Streamlit Cloud to prevent "gl_context" crashes)
-# MUST BE AT THE VERY TOP OF THE FILE!
 # -------------------------------------------------------------------------
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"            # Disable GPU visibility
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"            # Force software rendering
@@ -17,7 +17,6 @@ import mediapipe as mp
 import numpy as np
 import av
 import math
-import time
 from collections import deque
 import tempfile
 import matplotlib.pyplot as plt
@@ -74,23 +73,19 @@ class SitToStandLogic:
         self.incomplete_stand_counter = 0
 
     def process_frame(self, image):
-        # Initialize timer on first frame
         if self.start_time is None: self.start_time = time.time()
         
-        # Resize for performance and consistency
         target_w = 640
         h, w, c = image.shape
         scale = target_w / w
         new_h = int(h * scale)
         image = cv2.resize(image, (target_w, new_h))
         
-        # Convert to RGB for MediaPipe
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_rgb.flags.writeable = False
         results = self.pose.process(image_rgb)
         image.flags.writeable = True
         
-        # Defaults
         current_angle = 0
         feedback = "READY"
         feedback_color = (0, 255, 0) # Green
@@ -99,18 +94,14 @@ class SitToStandLogic:
         if results.pose_landmarks:
             try:
                 landmarks = results.pose_landmarks.landmark
-                
-                # Check Keypoints Visibility
                 vis_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].visibility
                 vis_knee = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value].visibility
                 
                 if vis_hip < VISIBILITY_THRESHOLD or vis_knee < VISIBILITY_THRESHOLD:
                     feedback = "LOW VISIBILITY"; feedback_color = (0, 0, 255)
                 else:
-                    # Helper to get coords
                     def get_raw(lm): return [lm.x, lm.y]
                     
-                    # Extract Landmarks
                     r_hip_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value])
                     r_knee_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value])
                     r_ankle_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value])
@@ -118,7 +109,6 @@ class SitToStandLogic:
                     l_shoulder_raw = get_raw(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value])
                     l_ankle_raw = get_raw(landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value])
 
-                    # Calculate Angles & Ratios
                     raw_angle = calculate_angle(r_hip_raw, r_knee_raw, r_ankle_raw)
                     self.angle_buffer.append(raw_angle)
                     current_angle = sum(self.angle_buffer) / len(self.angle_buffer)
@@ -128,13 +118,10 @@ class SitToStandLogic:
                     feet_width = calculate_distance(l_ankle_raw, r_ankle_raw)
                     stance_ratio = 0 if shoulder_width == 0 else feet_width / shoulder_width
 
-                    # Draw Angle on Knee
                     r_knee_px = tuple(np.multiply(r_knee_raw, [target_w, new_h]).astype(int))
                     cv2.putText(image, str(int(current_angle)), r_knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
 
-                    # --- SAFETY CHECK ---
                     potential_bad_posture = False; temp_feedback = ""
-                    
                     if stance_ratio < MIN_FEET_RATIO and current_angle > 150: 
                         potential_bad_posture = True; temp_feedback = "NARROW STANCE!"
                     elif stance_ratio > MAX_FEET_RATIO and current_angle > 150: 
@@ -150,7 +137,6 @@ class SitToStandLogic:
                     if potential_inc: self.incomplete_stand_counter += 1
                     else: self.incomplete_stand_counter = 0
 
-                    # Decision (Debounce)
                     if self.bad_posture_counter > BAD_POSTURE_DELAY:
                         feedback = temp_feedback; feedback_color = (0, 0, 255); self.current_rep_error = True 
                     elif self.incomplete_stand_counter > INCOMPLETE_STAND_DELAY:
@@ -158,17 +144,14 @@ class SitToStandLogic:
                     else:
                         feedback = "GOOD FORM"; feedback_color = (0, 255, 0)
 
-                    # --- REPETITION COUNTING ---
                     if current_angle > 160: 
                         self.stage = "up"
-                        # Reset error if form is corrected at top
                         if feedback == "GOOD FORM": 
                             self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
                     
                     if current_angle < 85 and self.stage == 'up':
                         self.stage = "down"
                         self.counter += 1
-                        # Log Quality
                         if not self.current_rep_error: self.rep_quality_history.append(1) 
                         else: self.rep_quality_history.append(0) 
                         self.current_rep_error = False 
@@ -177,22 +160,17 @@ class SitToStandLogic:
 
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # --- UI Overlay ---
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         x_rep = 15; x_feed = int(target_w * 0.2); x_acc = int(target_w * 0.65); x_time = int(target_w * 0.85)
-
         cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255), 2)
-        
         cv2.putText(image, 'FEEDBACK', (x_feed,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, feedback, (x_feed,65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, feedback_color, 2)
         
         current_acc = 0.0
         if len(self.rep_quality_history) > 0: current_acc = (sum(self.rep_quality_history) / len(self.rep_quality_history)) * 100
-        
         cv2.putText(image, 'ACC', (x_acc,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, f"{int(current_acc)}%", (x_acc,65), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
-        
         cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
         
@@ -214,30 +192,25 @@ if mode == "Webcam (Live)":
         
         def recv(self, frame):
             try:
+                # Add tiny sleep to yield CPU (Prevents freeze)
+                time.sleep(0.01)
+                
                 img = frame.to_ndarray(format="bgr24")
-                img = cv2.flip(img, 1) # Mirror effect for webcam
+                img = cv2.flip(img, 1) # Mirror
                 processed_img, _, _ = self.logic.process_frame(img)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
             except Exception as e:
-                # Return original frame if processing fails to avoid crash
                 return frame
 
-    st.info("💡 Instructions: Click 'START' and allow camera access. Stand sideways 2-3 meters away.")
+    st.info("💡 Instructions: Click 'START' and allow camera access.")
 
-    # 1. Configure STUN Servers to navigate Firewalls
+    # Optimized STUN Config for Cloud Stability
     RTC_CONFIGURATION = RTCConfiguration(
-        {"iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
-            {"urls": ["stun:stun3.l.google.com:19302"]},
-            {"urls": ["stun:stun4.l.google.com:19302"]},
-        ]}
+        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
     )
 
-    # 2. Key updated to v3 to ensure fresh connection
     ctx = webrtc_streamer(
-        key="sts-analyzer-english-v3",
+        key="sts-final-stable-v4",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         rtc_configuration=RTC_CONFIGURATION,
@@ -252,74 +225,39 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # Create temp file with .mp4 suffix so OpenCV can read it
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
         tfile.write(uploaded_file.read())
-        
         cap = cv2.VideoCapture(tfile.name)
         
         if not cap.isOpened():
             st.error("Error: Could not open video file.")
         else:
-            st_frame = st.empty()
-            logic = SitToStandLogic()
-            angle_data = []
-            time_data = []
+            st_frame = st.empty(); logic = SitToStandLogic(); angle_data = []; time_data = []
             
-            # Process Loop
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret: break
                 
                 processed_img, angle, timestamp = logic.process_frame(frame)
-                
-                # Collect Data
-                angle_data.append(angle)
-                time_data.append(timestamp)
-                
+                angle_data.append(angle); time_data.append(timestamp)
                 st_frame.image(processed_img, channels="BGR", use_column_width=True)
-            
             cap.release()
             
-            # ==========================================
-            # 📊 Post-Analysis Report
-            # ==========================================
             st.success("✅ Analysis Complete!")
-            st.divider()
-            st.subheader("📊 Summary Report")
-            
-            total_reps = len(logic.rep_quality_history)
-            correct_reps = sum(logic.rep_quality_history)
+            st.divider(); st.subheader("📊 Summary Report")
+            total_reps = len(logic.rep_quality_history); correct_reps = sum(logic.rep_quality_history)
             accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
             
             col1, col2, col3 = st.columns(3)
-            col1.metric("Total Reps", total_reps)
-            col2.metric("Good Form", correct_reps)
-            col3.metric("Accuracy", f"{accuracy:.1f}%")
+            col1.metric("Total Reps", total_reps); col2.metric("Good Form", correct_reps); col3.metric("Accuracy", f"{accuracy:.1f}%")
             
-            # Matplotlib Graphs
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-
-            # 1. Knee Angle Graph
             ax1.plot(time_data, angle_data, label='Knee Angle', color='blue')
             ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
             ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
-            ax1.set_title('Knee Angle Movement Analysis')
-            ax1.set_ylabel('Angle (degrees)')
-            ax1.set_xlabel('Time (s)')
-            ax1.grid(True)
-            ax1.legend()
-
-            # 2. Accuracy Bar Chart
-            labels = ['Correct', 'Incorrect']
-            counts = [correct_reps, total_reps - correct_reps]
+            ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
+            labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
             bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
-            ax2.set_title('Repetition Quality')
-            ax2.set_ylabel('Count')
-            
-            # Add labels to bars
-            for bar in bars:
-                ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), 
-                         f'{int(bar.get_height())}', ha='center', va='bottom')
-
+            ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
+            for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
             st.pyplot(fig)
