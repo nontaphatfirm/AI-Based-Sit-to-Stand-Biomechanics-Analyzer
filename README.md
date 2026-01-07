@@ -15,6 +15,8 @@ This tool performs real-time kinematic analysis of **Sit-to-Stand (STS)** moveme
 Web Version: Runs on iPad/iPhone/Android/PC:
 ### **[⬇️ Try Now (Streamlit .app)](https://ai-based-sts-biomechanics-analyzer.streamlit.app/)**
 
+---
+
 ## 📥 Download Executable
 Run the application on Windows without installing Python:
 ### **[⬇️ Download v1.0 (Windows .exe)](https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer/releases)**
