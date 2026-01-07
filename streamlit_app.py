@@ -1,8 +1,7 @@
 import os
-import sys
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1" 
+os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 os.environ["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
 
 import streamlit as st
@@ -211,9 +210,9 @@ if mode == "Webcam (Live)":
         },
         media_stream_constraints={
             "video": {
-                "width": {"min": 480, "ideal": 640, "max": 640},
-                "height": {"min": 480, "ideal": 480, "max": 480},
-                "frameRate": {"max": 30},
+                "width": 480,
+                "height": 360,
+                "frameRate": 15
             },
             "audio": False
         },

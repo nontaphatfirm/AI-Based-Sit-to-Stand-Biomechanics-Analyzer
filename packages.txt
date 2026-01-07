@@ -1,7 +1,9 @@
+freeglut3-dev
+libgtk2.0-dev
 libgl1
 libgl1-mesa-glx
 libglib2.0-0
 libsm6
 libxext6
-libxrender-dev
+libxrender1
 mesa-utils
