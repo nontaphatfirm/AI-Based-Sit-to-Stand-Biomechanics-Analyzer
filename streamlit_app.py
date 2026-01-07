@@ -12,7 +12,7 @@ os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"            # Force software rendering
 os.environ["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe" # Force LLVMpipe driver
 
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode, RTCConfiguration
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -214,38 +214,41 @@ if mode == "Webcam (Live)":
         
         def recv(self, frame):
             try:
+                # Tiny sleep to yield CPU -> Prevents 'NoneType' errors on weak networks
                 time.sleep(0.01)
+                
                 img = frame.to_ndarray(format="bgr24")
-                img = cv2.flip(img, 1)
+                img = cv2.flip(img, 1) # Mirror
                 processed_img, _, _ = self.logic.process_frame(img)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-            except Exception:
+            except Exception as e:
+                # Return original frame if processing fails
                 return frame
 
-    st.info("💡 Instructions: Click 'START'. If WiFi fails, please use Mobile Hotspot.")
+    st.info("💡 Instructions: Click 'START'. If it fails on WiFi, try using Mobile Hotspot.")
 
     # -------------------------------------------------------------
-    # 🛡️ FIREWALL BREAKER CONFIG
-    # ใช้ OpenRelay + Google STUN 
+    # 🛡️ FIREWALL BREAKER CONFIG (OpenRelay + Google STUN)
     # -------------------------------------------------------------
     RTC_CONFIGURATION = RTCConfiguration(
         {"iceServers": [
-            # 1. Google STUN 
+            # 1. Google STUN (Standard)
             {"urls": ["stun:stun.l.google.com:19302"]},
             
-            # 2. OpenRelay 
+            # 2. OpenRelay (Free TURN - Bypass Port 80/443)
             {"urls": ["turn:openrelay.metered.ca:80"], "username": "openrelayproject", "credential": "openrelayproject"},
             {"urls": ["turn:openrelay.metered.ca:443"], "username": "openrelayproject", "credential": "openrelayproject"},
             {"urls": ["turn:openrelay.metered.ca:443?transport=tcp"], "username": "openrelayproject", "credential": "openrelayproject"},
         ]}
     )
-
+    
     ctx = webrtc_streamer(
-        key="sts-firewall-breaker-v9",
+        key="sts-openrelay-v10", # New Key
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
+            # Lower resolution to pass through tight firewalls
             "video": {"width": 320, "height": 240, "frameRate": 15},
             "audio": False
         },
