@@ -2,15 +2,16 @@ import os
 import sys
 
 # -------------------------------------------------------------------------
-# 🔧 FORCED CPU MODE: Force CPU usage 100%
+# 🔧 FORCED CPU MODE: Force CPU usage 100% 
 # (Crucial for Streamlit Cloud to prevent "gl_context" crashes)
+# MUST BE AT THE VERY TOP OF THE FILE!
 # -------------------------------------------------------------------------
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"            # Disable GPU visibility
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"            # Force software rendering
 os.environ["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe" # Force LLVMpipe driver
 
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode, RTCConfiguration
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -218,20 +219,28 @@ if mode == "Webcam (Live)":
                 processed_img, _, _ = self.logic.process_frame(img)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
             except Exception as e:
-                # Return original frame if processing fails
+                # Return original frame if processing fails to avoid crash
                 return frame
 
     st.info("💡 Instructions: Click 'START' and allow camera access. Stand sideways 2-3 meters away.")
 
-    # ⚠️ Key Updated to ensure fresh connection
+    # 1. Configure STUN Servers to navigate Firewalls
+    RTC_CONFIGURATION = RTCConfiguration(
+        {"iceServers": [
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {"urls": ["stun:stun2.l.google.com:19302"]},
+            {"urls": ["stun:stun3.l.google.com:19302"]},
+            {"urls": ["stun:stun4.l.google.com:19302"]},
+        ]}
+    )
+
+    # 2. Key updated to v3 to ensure fresh connection
     ctx = webrtc_streamer(
-        key="sts-analyzer-english-v1",
+        key="sts-analyzer-english-v3",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
-        rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-        },
-        # Optimize for Mobile/Cloud (Lower resolution to prevent crashes)
+        rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
             "video": {"width": 480, "height": 360, "frameRate": 15},
             "audio": False
