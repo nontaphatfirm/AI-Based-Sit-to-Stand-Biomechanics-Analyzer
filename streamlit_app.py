@@ -1,5 +1,10 @@
 import os
-os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+import sys
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1" 
+os.environ["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
+
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import cv2
@@ -10,7 +15,7 @@ import math
 import time
 from collections import deque
 import tempfile
-import matplotlib.pyplot as plt # 📈 Import Matplotlib
+import matplotlib.pyplot as plt
 
 # ==========================================
 # ⚙️ Configuration
