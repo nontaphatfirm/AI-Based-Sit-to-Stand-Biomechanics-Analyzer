@@ -190,7 +190,28 @@ if mode == "Webcam (Live)":
             processed_img, _, _ = self.logic.process_frame(img)
             return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
 
-    ctx = webrtc_streamer(key="sts-analyzer", video_processor_factory=VideoProcessor, media_stream_constraints={"video": True, "audio": False})
+    ctx = webrtc_streamer(
+        key="sts-analyzer",
+        video_processor_factory=VideoProcessor,
+        rtc_configuration={
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {"urls": ["stun:stun2.l.google.com:19302"]},
+                {"urls": ["stun:stun3.l.google.com:19302"]},
+                {"urls": ["stun:stun4.l.google.com:19302"]},
+            ]
+        },
+        media_stream_constraints={
+            "video": {
+                "width": {"min": 480, "ideal": 640, "max": 640},
+                "height": {"min": 480, "ideal": 480, "max": 480},
+                "frameRate": {"max": 30},
+            },
+            "audio": False
+        },
+        async_processing=True,
+    )
     st.info("Note: Graphing is currently available in 'Video File' mode only.")
 
 elif mode == "Video File":
