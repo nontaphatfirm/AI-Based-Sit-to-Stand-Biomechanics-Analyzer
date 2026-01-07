@@ -21,13 +21,14 @@ import tempfile
 import matplotlib.pyplot as plt
 
 # ==========================================
-# ⚙️ Configuration
+# ⚙️ Configuration & Thresholds
 # ==========================================
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
 
+# Smoothing & Logic Constants
 SMOOTH_WINDOW = 7
-VISIBILITY_THRESHOLD = 0.5 
+VISIBILITY_THRESHOLD = 0.5
 LEAN_THRESHOLD = 45
 MIN_FEET_RATIO = 0.5
 MAX_FEET_RATIO = 1.4
@@ -38,6 +39,7 @@ INCOMPLETE_STAND_DELAY = 15
 # 📐 Helper Functions
 # ==========================================
 def calculate_angle(a, b, c):
+    """ Calculate angle between three points (a, b, c) """
     a = np.array(a); b = np.array(b); c = np.array(c)
     radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
     angle = np.abs(radians*180.0/np.pi)
@@ -45,38 +47,52 @@ def calculate_angle(a, b, c):
     return angle
 
 def calculate_distance(p1, p2):
+    """ Calculate Euclidean distance """
     return math.hypot(p2[0]-p1[0], p2[1]-p1[1])
 
 def calculate_vertical_angle(a, b):
+    """ Calculate angle relative to vertical axis """
     return np.degrees(np.arctan2(abs(a[0] - b[0]), abs(a[1] - b[1])))
 
 # ==========================================
-# 🧠 Logic Class (Foreshortening Detection)
+# 🧠 Logic Class (Smart Leg + Original UI)
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
         self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7)
-        self.counter = 0; self.stage = None; self.start_time = None
+        self.counter = 0
+        self.stage = None
+        self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
         self.rep_quality_history = [] 
-        self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
-        self.current_side = "DETECTING..." 
+        
+        # State Flags
+        self.current_rep_error = False
+        self.bad_posture_counter = 0
+        self.incomplete_stand_counter = 0
+        self.current_side = "AUTO"
 
     def process_frame(self, image):
+        # Initialize timer on first frame
         if self.start_time is None: self.start_time = time.time()
         
+        # Resize for performance
         target_w = 640
         h, w, c = image.shape
         scale = target_w / w
         new_h = int(h * scale)
         image = cv2.resize(image, (target_w, new_h))
         
+        # Convert to RGB for MediaPipe
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_rgb.flags.writeable = False
         results = self.pose.process(image_rgb)
         image.flags.writeable = True
         
-        current_angle = 0; feedback = "READY"; feedback_color = (0, 255, 0)
+        # Defaults
+        current_angle = 0
+        feedback = "READY"
+        feedback_color = (0, 255, 0) # Green
         current_time_seconds = time.time() - self.start_time
 
         if results.pose_landmarks:
@@ -84,32 +100,29 @@ class SitToStandLogic:
                 landmarks = results.pose_landmarks.landmark
                 
                 # =========================================================
-                # 🧠 LOGIC: Longest Thigh Selection (แก้ Foreshortening)
+                # 🧠 SMART LEG SELECTION (Longest Thigh Logic)
                 # =========================================================
                 def get_raw(lm): return [lm.x, lm.y]
                 
-                # 1. Get Landmarks
+                # Get Landmarks for both sides
                 l_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
                 l_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value]
                 r_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
                 r_knee = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value]
 
-                # 2. Calculate "Apparent Thigh Length" (ระยะ 2D บนหน้าจอ)
-                # สูตร: ระยะห่างจริงระหว่างจุด Hip กับ Knee (รวมแกน X และ Y)
-                # ถ้าขาไหนหันหน้าหากล้อง ค่านี้จะต่ำมาก (เพราะจุดมันซ้อนกัน)
+                # Calculate Apparent Thigh Length (2D Projection)
                 len_thigh_left = math.hypot(l_knee.x - l_hip.x, l_knee.y - l_hip.y)
                 len_thigh_right = math.hypot(r_knee.x - r_hip.x, r_knee.y - r_hip.y)
 
-                # 3. Get Visibility
+                # Get Visibility
                 vis_left = (l_hip.visibility + l_knee.visibility) / 2
                 vis_right = (r_hip.visibility + r_knee.visibility) / 2
 
-                # 4. Final Score (ให้น้ำหนักความยาวขา 80%, ความชัด 20%)
-                # ขาที่ยาวย่อมดีกว่าขาที่สั้นเสมอ ในมุมมอง 2D
+                # Scoring: Weight Length 80%, Visibility 20%
                 score_left = (len_thigh_left * 3.0) + vis_left
                 score_right = (len_thigh_right * 3.0) + vis_right
 
-                # 5. Select Best Side
+                # Select Best Side
                 if score_left > score_right:
                     self.current_side = "LEFT"
                     hip_idx = mp_pose.PoseLandmark.LEFT_HIP.value
@@ -122,25 +135,27 @@ class SitToStandLogic:
                     knee_idx = mp_pose.PoseLandmark.RIGHT_KNEE.value
                     ankle_idx = mp_pose.PoseLandmark.RIGHT_ANKLE.value
                     shoulder_idx = mp_pose.PoseLandmark.RIGHT_SHOULDER.value
-
                 # =========================================================
 
-                # Check minimum visibility
+                # Check Visibility of Selected Leg
                 selected_knee_vis = landmarks[knee_idx].visibility
                 
                 if selected_knee_vis < VISIBILITY_THRESHOLD:
                     feedback = "LOW VISIBILITY"; feedback_color = (0, 0, 255)
                 else:
+                    # Extract Keypoints
                     hip_raw = get_raw(landmarks[hip_idx])
                     knee_raw = get_raw(landmarks[knee_idx])
                     ankle_raw = get_raw(landmarks[ankle_idx])
                     shoulder_raw = get_raw(landmarks[shoulder_idx])
                     
+                    # For Stance Check (Need Both)
                     r_shoulder_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value])
                     l_shoulder_raw = get_raw(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value])
                     r_ankle_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value])
                     l_ankle_raw = get_raw(landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value])
 
+                    # Calculate Angles
                     raw_angle = calculate_angle(hip_raw, knee_raw, ankle_raw)
                     self.angle_buffer.append(raw_angle)
                     current_angle = sum(self.angle_buffer) / len(self.angle_buffer)
@@ -150,11 +165,9 @@ class SitToStandLogic:
                     feet_width = calculate_distance(l_ankle_raw, r_ankle_raw)
                     stance_ratio = 0 if shoulder_width == 0 else feet_width / shoulder_width
 
+                    # Draw Angle
                     knee_px = tuple(np.multiply(knee_raw, [target_w, new_h]).astype(int))
                     cv2.putText(image, str(int(current_angle)), knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
-                    
-                    # Debug Info: Show which leg is active
-                    cv2.putText(image, f"Active: {self.current_side}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
                     # --- SAFETY CHECK ---
                     potential_bad_posture = False; temp_feedback = ""
@@ -174,6 +187,7 @@ class SitToStandLogic:
                     if potential_inc: self.incomplete_stand_counter += 1
                     else: self.incomplete_stand_counter = 0
 
+                    # Decision
                     if self.bad_posture_counter > BAD_POSTURE_DELAY:
                         feedback = temp_feedback; feedback_color = (0, 0, 255); self.current_rep_error = True 
                     elif self.incomplete_stand_counter > INCOMPLETE_STAND_DELAY:
@@ -198,14 +212,39 @@ class SitToStandLogic:
 
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # --- UI Overlay ---
-        cv2.rectangle(image, (0, new_h - 60), (target_w, new_h), (0,0,0), -1)
-        cv2.putText(image, f"REPS: {self.counter}", (20, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
-        cv2.putText(image, feedback, (180, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, feedback_color, 2)
+        # ------------------------------------------------------------------
+        # 🎨 INTERFACE RESTORED (Original Top Bar Style)
+        # ------------------------------------------------------------------
+        # Background Rectangle (Top)
+        cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         
+        # UI Layout Coordinates
+        x_rep = 15
+        x_feed = int(target_w * 0.2)
+        x_acc = int(target_w * 0.65)
+        x_time = int(target_w * 0.85)
+
+        # 1. Reps
+        cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
+        cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255), 2)
+        
+        # 2. Feedback
+        cv2.putText(image, 'FEEDBACK', (x_feed,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
+        cv2.putText(image, feedback, (x_feed,65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, feedback_color, 2)
+        
+        # 3. Accuracy
         current_acc = 0.0
         if len(self.rep_quality_history) > 0: current_acc = (sum(self.rep_quality_history) / len(self.rep_quality_history)) * 100
-        cv2.putText(image, f"ACC: {int(current_acc)}%", (target_w - 140, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+        
+        cv2.putText(image, 'ACC', (x_acc,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
+        cv2.putText(image, f"{int(current_acc)}%", (x_acc,65), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
+        
+        # 4. Time
+        cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
+        cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+        
+        # Debug: Show Active Leg (Small text below bar) [Optional but helpful]
+        cv2.putText(image, f"Active: {self.current_side}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
         return image, current_angle, current_time_seconds
 
@@ -220,23 +259,30 @@ mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
 if mode == "Webcam (Live)":
     class VideoProcessor(VideoTransformerBase):
-        def __init__(self): self.logic = SitToStandLogic()
+        def __init__(self): 
+            self.logic = SitToStandLogic()
+        
         def recv(self, frame):
             try:
-                time.sleep(0.01)
+                time.sleep(0.01) # Yield CPU
                 img = frame.to_ndarray(format="bgr24")
                 img = cv2.flip(img, 1) # Mirror
                 processed_img, _, _ = self.logic.process_frame(img)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-            except Exception as e: return frame
+            except Exception as e:
+                return frame
 
     st.info("💡 Instructions: Click 'START'. If WiFi fails, try using Mobile Hotspot.")
     
+    # Auto-TURN Config
     ctx = webrtc_streamer(
-        key="sts-webcam-final-v14", # New Key
+        key="sts-webcam-restored-v15",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
-        media_stream_constraints={"video": {"width": 320, "height": 240, "frameRate": 15}, "audio": False},
+        media_stream_constraints={
+            "video": {"width": 320, "height": 240, "frameRate": 15},
+            "audio": False
+        },
         async_processing=True,
     )
 
@@ -251,13 +297,17 @@ elif mode == "Video File":
         if not cap.isOpened():
             st.error("Error: Could not open video file.")
         else:
+            # 1. Setup Video Writer
             logic = SitToStandLogic()
             angle_data = []; time_data = []
             
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             
+            # Create Temp Output
             temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+            
+            # Match dimensions
             target_w = 640
             original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -267,10 +317,13 @@ elif mode == "Video File":
             fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
             out = cv2.VideoWriter(temp_output.name, fourcc, fps, (target_w, target_h))
 
+            # 2. UI Elements
             progress_bar = st.progress(0)
             status_text = st.empty()
+            
             st.info("⏳ Processing video... Please wait.")
             
+            # 3. Process Loop
             frame_count = 0
             while cap.isOpened():
                 ret, frame = cap.read()
@@ -288,20 +341,27 @@ elif mode == "Video File":
                     progress_bar.progress(progress)
                     status_text.text(f"Processing frame {frame_count}/{total_frames}")
 
+            # 4. Cleanup & Converter
             cap.release()
             out.release()
             progress_bar.empty()
             status_text.empty()
             
+            # ⚙️ CONVERT TO H.264 (Fixes black screen in browser)
             converted_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             os.system(f"ffmpeg -y -i {temp_output.name} -vcodec libx264 {converted_output.name}")
 
+            # ==========================================
+            # 📊 Show Results
+            # ==========================================
             st.success("✅ Analysis Complete!")
+            
             st.subheader("🎬 Analyzed Video")
             st.video(converted_output.name)
             
             st.divider()
             st.subheader("📊 Summary Report")
+            
             total_reps = len(logic.rep_quality_history)
             correct_reps = sum(logic.rep_quality_history)
             accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
