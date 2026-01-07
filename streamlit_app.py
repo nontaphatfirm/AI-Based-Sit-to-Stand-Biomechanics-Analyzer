@@ -214,29 +214,39 @@ if mode == "Webcam (Live)":
         
         def recv(self, frame):
             try:
-                # Tiny sleep to yield CPU -> Prevents 'NoneType' errors on weak networks
                 time.sleep(0.01)
-                
                 img = frame.to_ndarray(format="bgr24")
-                img = cv2.flip(img, 1) # Mirror
+                img = cv2.flip(img, 1)
                 processed_img, _, _ = self.logic.process_frame(img)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-            except Exception as e:
-                # Return original frame if processing fails
+            except Exception:
                 return frame
 
-    st.info("💡 Instructions: Click 'START' and allow camera access.")
+    st.info("💡 Instructions: Click 'START'. If WiFi fails, please use Mobile Hotspot.")
 
-    # ✅ KEY POINT: 'rtc_configuration' REMOVED!
-    # This allows Streamlit to automatically use its Global TURN Servers to bypass Firewalls.
-    
+    # -------------------------------------------------------------
+    # 🛡️ FIREWALL BREAKER CONFIG
+    # ใช้ OpenRelay + Google STUN 
+    # -------------------------------------------------------------
+    RTC_CONFIGURATION = RTCConfiguration(
+        {"iceServers": [
+            # 1. Google STUN 
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            
+            # 2. OpenRelay 
+            {"urls": ["turn:openrelay.metered.ca:80"], "username": "openrelayproject", "credential": "openrelayproject"},
+            {"urls": ["turn:openrelay.metered.ca:443"], "username": "openrelayproject", "credential": "openrelayproject"},
+            {"urls": ["turn:openrelay.metered.ca:443?transport=tcp"], "username": "openrelayproject", "credential": "openrelayproject"},
+        ]}
+    )
+
     ctx = webrtc_streamer(
-        key="sts-english-auto-v8", # New Key for fresh session
+        key="sts-firewall-breaker-v9",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
-        # No rtc_configuration = Auto TURN Server
+        rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
-            "video": {"width": 480, "height": 360, "frameRate": 15},
+            "video": {"width": 320, "height": 240, "frameRate": 15},
             "audio": False
         },
         async_processing=True,
