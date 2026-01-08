@@ -55,7 +55,7 @@ def calculate_vertical_angle(a, b):
     return np.degrees(np.arctan2(abs(a[0] - b[0]), abs(a[1] - b[1])))
 
 # ==========================================
-# 🧠 Logic Class
+# 🧠 Logic Class (Smart Leg + Original UI)
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
@@ -66,6 +66,7 @@ class SitToStandLogic:
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
         self.rep_quality_history = [] 
         
+        # State Flags
         self.current_rep_error = False
         self.bad_posture_counter = 0
         self.incomplete_stand_counter = 0
@@ -75,7 +76,7 @@ class SitToStandLogic:
         # Initialize timer on first frame
         if self.start_time is None: self.start_time = time.time()
         
-        # Resize for performance (Standard mobile width)
+        # Resize for performance
         target_w = 640
         h, w, c = image.shape
         scale = target_w / w
@@ -98,7 +99,9 @@ class SitToStandLogic:
             try:
                 landmarks = results.pose_landmarks.landmark
                 
-                # --- Smart Leg Logic ---
+                # =========================================================
+                # 🧠 SMART LEG SELECTION (Longest Thigh Logic)
+                # =========================================================
                 def get_raw(lm): return [lm.x, lm.y]
                 
                 # Get Landmarks for both sides
@@ -132,6 +135,7 @@ class SitToStandLogic:
                     knee_idx = mp_pose.PoseLandmark.RIGHT_KNEE.value
                     ankle_idx = mp_pose.PoseLandmark.RIGHT_ANKLE.value
                     shoulder_idx = mp_pose.PoseLandmark.RIGHT_SHOULDER.value
+                # =========================================================
 
                 # Check Visibility of Selected Leg
                 selected_knee_vis = landmarks[knee_idx].visibility
@@ -208,10 +212,15 @@ class SitToStandLogic:
 
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # --- UI Overlay (Original Style) ---
+        # ------------------------------------------------------------------
+        # 🎨 INTERFACE RESTORED (Original Top Bar Style)
+        # ------------------------------------------------------------------
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         
-        x_rep = 15; x_feed = int(target_w * 0.2); x_acc = int(target_w * 0.65); x_time = int(target_w * 0.85)
+        x_rep = 15
+        x_feed = int(target_w * 0.2)
+        x_acc = int(target_w * 0.65)
+        x_time = int(target_w * 0.85)
 
         cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255), 2)
@@ -252,7 +261,6 @@ if mode == "Webcam (Live)":
             self.logic = SitToStandLogic()
             self.angle_history = []
             self.time_history = []
-            self.recorded_frames = [] # Buffer for video recording
         
         def recv(self, frame):
             try:
@@ -267,78 +275,46 @@ if mode == "Webcam (Live)":
                 self.angle_history.append(angle)
                 self.time_history.append(timestamp)
                 
-                # Save frame to RAM buffer
-                self.recorded_frames.append(processed_img.copy())
-                
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
             except Exception as e:
                 return frame
         
         def get_stats(self):
-            # Write video to temp file when stopped
-            video_path = None
-            if len(self.recorded_frames) > 0:
-                temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                height, width, layers = self.recorded_frames[0].shape
-                # Use mp4v for speed writing
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                # Use 20 fps to match the webcam stream rate
-                out = cv2.VideoWriter(temp_output, fourcc, 20, (width, height))
-                for frame in self.recorded_frames:
-                    out.write(frame)
-                out.release()
-                video_path = temp_output
-
             return {
                 "rep_quality_history": self.logic.rep_quality_history,
                 "angle_history": self.angle_history,
-                "time_history": self.time_history,
-                "video_path": video_path
+                "time_history": self.time_history
             }
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results. If WiFi fails, try using Mobile Hotspot.")
     
-    # ✅ INCREASED WEBCAM RESOLUTION HERE
+    # Auto-TURN Config
     ctx = webrtc_streamer(
-        key="sts-webcam-highres-v19", # Key ใหม่
+        key="sts-webcam-final-v17", # Key ใหม่
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={
-            "video": {"width": 640, "height": 480, "frameRate": 20}, # ปรับเป็น 640x480 @ 20fps
+            "video": {"width": 640, "height": 480, "frameRate": 30},
             "audio": False
         },
         async_processing=True,
     )
 
-    # Logic to capture data AFTER stop
+    # 📊 Logic to capture data AFTER stop
     if ctx.video_processor:
+        # Save data while running
         st.session_state["webcam_results"] = ctx.video_processor.get_stats()
 
-    # If stream stopped AND we have data -> Show Graphs & Video
+    # If stream stopped AND we have data -> Show Graphs
     if not ctx.state.playing and st.session_state["webcam_results"]:
         data = st.session_state["webcam_results"]
         rep_history = data["rep_quality_history"]
+        angle_hist = data["angle_history"]
+        time_hist = data["time_history"]
         
-        # ==========================================
-        # 🎬 SHOW VIDEO REPLAY
-        # ==========================================
-        raw_video_path = data.get("video_path")
-        if raw_video_path and os.path.exists(raw_video_path):
+        if len(rep_history) > 0 or len(angle_hist) > 0:
             st.divider()
-            st.subheader("🎬 Analyzed Replay")
-            
-            # Convert to H.264 for Browser Playback
-            converted_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-            with st.spinner("Preparing video replay..."):
-                os.system(f"ffmpeg -y -i {raw_video_path} -vcodec libx264 {converted_path} -hide_banner -loglevel error")
-            
-            st.video(converted_path)
-        
-        # ==========================================
-        # 📊 SHOW GRAPHS
-        # ==========================================
-        if len(rep_history) > 0 or len(data["angle_history"]) > 0:
-            st.subheader("📊 Session Summary")
+            st.subheader("📊 Session Summary (Webcam)")
             
             total_reps = len(rep_history)
             correct_reps = sum(rep_history)
@@ -351,11 +327,13 @@ if mode == "Webcam (Live)":
             
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
             
-            ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
+            # Graph 1
+            ax1.plot(time_hist, angle_hist, label='Knee Angle', color='blue')
             ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
             ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
             ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
             
+            # Graph 2
             labels = ['Correct', 'Incorrect']
             counts = [correct_reps, total_reps - correct_reps]
             bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
@@ -364,10 +342,10 @@ if mode == "Webcam (Live)":
             
             st.pyplot(fig)
             
-            # Clear state button
+            # Clear state button (Fixed)
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
-                st.rerun()
+                st.rerun() # ✅ Fixed: Using st.rerun() instead of experimental_rerun()
 
 elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
