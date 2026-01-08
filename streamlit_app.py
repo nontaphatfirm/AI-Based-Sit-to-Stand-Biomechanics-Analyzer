@@ -342,7 +342,7 @@ if mode == "Webcam (Live)":
             # Clear state button
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
-                st.experimental_rerun()
+                st.rerun()
 
 elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
