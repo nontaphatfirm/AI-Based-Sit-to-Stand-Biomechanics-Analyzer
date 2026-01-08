@@ -213,7 +213,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v27", 
+        key="sts-webcam-safe-v28", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -259,19 +259,16 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # Generate persistent file paths based on unique file ID
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         output_filename = f"processed_{file_id}.mp4"
         output_path = os.path.join(tempfile.gettempdir(), output_filename)
-        
-        # ✅ KEY FIX: Stats Key for Session State
         stats_key = f"stats_{file_id}"
 
         # -----------------------------------------------------------
         # CASE 1: Video exists AND stats exist (User clicked download)
         # -----------------------------------------------------------
         if os.path.exists(output_path) and stats_key in st.session_state:
-            stats = st.session_state[stats_key] # Retrieve cached stats
+            stats = st.session_state[stats_key] 
             
             st.success("✅ Analysis Complete! (Loaded from Cache)")
             st.subheader("🎬 Analyzed Video")
@@ -279,7 +276,6 @@ elif mode == "Video File":
             with open(output_path, "rb") as file:
                 st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
 
-            # Show Graphs (Logic reused)
             st.divider()
             st.subheader("📊 Summary Report")
             total_reps = len(stats["reps"])
@@ -372,20 +368,18 @@ elif mode == "Video File":
                 progress_bar.empty()
                 status_text.empty()
                 
-                # Convert & Save Final
                 if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                     os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
                     
-                    # ✅ SAVE STATS TO SESSION STATE
+                    # ✅ SAVE STATS
                     st.session_state[stats_key] = {
                         "reps": logic.rep_quality_history,
                         "angles": angle_data,
                         "times": time_data
                     }
                     
-                    st.experimental_rerun() # Force reload to enter CASE 1 immediately
+                    st.rerun() # ✅ Fixed here too
                 
-                # Cleanup
                 if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                 if os.path.exists(sanitized_input): os.remove(sanitized_input)
                 if os.path.exists(temp_output): os.remove(temp_output)
