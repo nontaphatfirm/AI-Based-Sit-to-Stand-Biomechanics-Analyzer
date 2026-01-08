@@ -192,6 +192,23 @@ if "webcam_results" not in st.session_state: st.session_state["webcam_results"] 
 
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
+with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=False):
+    st.markdown(
+        """
+        ### 📸 Camera Positioning (Crucial!)
+        For the best AI analysis, please set up your camera as follows:
+        1.  **🧍 Side View:** Turn your body **sideways** (Side Profile) to the camera.
+        2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe**.
+        3.  **📐 Angle:** You can stand slightly angled (45°), but a direct side view is best.
+        
+        ---
+        ### 📝 Instructions
+        * **Webcam:** Click **"Allow"** browser permission → Select Device → Click **"START"**.
+        * **Video File:** Upload a video (`.mp4`) recorded with the positioning above.
+        * **Troubleshooting:** If the webcam freezes/fails, try using a **Mobile Hotspot**.
+        """
+    )
+
 if mode == "Webcam (Live)":
     class VideoProcessor(VideoTransformerBase):
         def __init__(self): 
@@ -215,22 +232,6 @@ if mode == "Webcam (Live)":
                 "angle_history": self.angle_history,
                 "time_history": self.time_history
             }
-
-    with st.expander("💡 View Instructions & Connection Tips (Click to open)", expanded=False):
-        st.markdown(
-            """
-            ### 📝 How to use
-            1. **Allow Access:** Please click **"Allow"** when the browser asks for camera permission.
-            2. **Select Camera:** Click **"SELECT DEVICE"** to choose your preferred camera (Front/Back).
-            3. **Start Analysis:** Click the `START` button below.
-            4. **Perform Action:** Do the Sit-to-Stand exercise in front of the camera.
-            5. **Get Results:** Click `STOP` when finished to see the **Replay Video** and **Graphs**.
-
-            ### ⚠️ Troubleshooting
-            * **Network Error?** If the video doesn't start, your WiFi firewall might be blocking it.
-            * **Solution:** Please try switching to a **Mobile Hotspot (4G/5G)**.
-            """
-        )
 
     ctx = webrtc_streamer(
         key="sts-webcam-safe-v32", 
