@@ -194,7 +194,7 @@ class SitToStandLogic:
 
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # UI Overlay (Original Style)
+        # UI Overlay
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         
         x_rep = 20
@@ -326,13 +326,28 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-        tfile.write(uploaded_file.read())
-        cap = cv2.VideoCapture(tfile.name)
+        # 1. Save uploaded file first
+        raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
+        raw_tfile.write(uploaded_file.read())
+        raw_tfile.close() # Close to ensure flush
+        
+        # ========================================================
+        # 🔧 AUTO-FIX INPUT: Convert ANY format to Clean H.264
+        # ========================================================
+        sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+        st.info("🔄 Converting video format for compatibility... (This may take a moment)")
+        
+        # Use ffmpeg to force convert input to standard H.264
+        # This fixes 'AxiosError' related to corrupt headers or H.265/HEVC from phones
+        os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
+        
+        # Use the sanitized file for OpenCV
+        cap = cv2.VideoCapture(sanitized_input)
         
         if not cap.isOpened():
-            st.error("Error: Could not open video file.")
+            st.error("Error: Could not open video file even after conversion.")
         else:
+            # 2. Setup Video Writer
             logic = SitToStandLogic()
             angle_data = []; time_data = []
             
@@ -341,13 +356,26 @@ elif mode == "Video File":
             
             temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             
-            # ✅ FIX: Initialize VideoWriter inside the loop to match exact dimensions
+            # ✅ Output dimensions handling
+            target_w = 1280 
+            original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            if original_w > target_w:
+                scale = target_w / original_w
+                target_h = int(original_h * scale)
+            else:
+                target_w = original_w
+                target_h = original_h
+            
+            # Initialize Writer
             out = None
             frame_count = 0
             
             progress_bar = st.progress(0)
             status_text = st.empty()
-            st.info("⏳ Processing video... Please wait.")
+            
+            st.info("⏳ Analyzing video frames...")
             
             while cap.isOpened():
                 ret, frame = cap.read()
@@ -355,7 +383,7 @@ elif mode == "Video File":
                 
                 processed_img, angle, timestamp = logic.process_frame(frame)
                 
-                # Initialize Writer Once using the actual processed frame size
+                # Lazy Initialize Writer (Ensure size match)
                 if out is None:
                     h, w = processed_img.shape[:2]
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -377,11 +405,11 @@ elif mode == "Video File":
             progress_bar.empty()
             status_text.empty()
             
-            # ⚙️ CONVERT TO H.264
+            # ⚙️ CONVERT OUTPUT TO H.264 (For Browser Playback)
             converted_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             
-            # Check if file exists and has size
-            if os.path.exists(temp_output.name) and os.path.getsize(temp_output.name) > 0:
+            # Check if output file exists and is valid
+            if os.path.exists(temp_output.name) and os.path.getsize(temp_output.name) > 1000:
                 os.system(f"ffmpeg -y -i {temp_output.name} -vcodec libx264 {converted_output.name} -hide_banner -loglevel error")
                 
                 st.success("✅ Analysis Complete!")
@@ -390,9 +418,9 @@ elif mode == "Video File":
                 
                 # Add Download Button
                 with open(converted_output.name, "rb") as file:
-                    st.download_button(label="Download Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
+                    st.download_button(label="Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
             else:
-                st.error("Error: Video processing failed (Output file is empty).")
+                st.error("Error: Video processing failed. The output file was empty.")
 
             st.divider()
             st.subheader("📊 Summary Report")
