@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import gc
+import uuid
+import hashlib # ✅ เพิ่มไลบรารีสำหรับสร้างลายนิ้วมือไฟล์
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -183,6 +185,9 @@ st.set_page_config(page_title="STS Analyzer", layout="wide")
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
+if "user_session_id" not in st.session_state:
+    st.session_state["user_session_id"] = str(uuid.uuid4())[:8]
+
 if "webcam_results" not in st.session_state: st.session_state["webcam_results"] = None
 
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
@@ -213,7 +218,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v28", 
+        key="sts-webcam-safe-v30", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -259,16 +264,25 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+        # ✅ Generate HASH from file content (Unique for every file content)
+        uploaded_file.seek(0)
+        file_bytes = uploaded_file.read(2 * 1024 * 1024) # Read first 2MB for hashing (fast & accurate)
+        file_hash = hashlib.md5(file_bytes).hexdigest()
+        uploaded_file.seek(0) # ⚠️ Reset cursor back to start!
+
+        # Combine Session ID + File Hash
+        session_id = st.session_state["user_session_id"]
+        file_id = f"{session_id}_{file_hash}"
+        
         output_filename = f"processed_{file_id}.mp4"
         output_path = os.path.join(tempfile.gettempdir(), output_filename)
         stats_key = f"stats_{file_id}"
 
         # -----------------------------------------------------------
-        # CASE 1: Video exists AND stats exist (User clicked download)
+        # CASE 1: Load from Cache
         # -----------------------------------------------------------
         if os.path.exists(output_path) and stats_key in st.session_state:
-            stats = st.session_state[stats_key] 
+            stats = st.session_state[stats_key]
             
             st.success("✅ Analysis Complete! (Loaded from Cache)")
             st.subheader("🎬 Analyzed Video")
@@ -299,14 +313,14 @@ elif mode == "Video File":
             plt.close(fig)
 
         # -----------------------------------------------------------
-        # CASE 2: Video exists but NO stats (App rebooted)
+        # CASE 2: Video exists but Stats missing (Rebooted)
         # -----------------------------------------------------------
         elif os.path.exists(output_path) and stats_key not in st.session_state:
              st.success("✅ Analysis Loaded from Cache!")
              st.video(output_path)
              with open(output_path, "rb") as file:
                 st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
-             st.info("ℹ️ Rename the file to re-process for new stats (Server was rebooted).")
+             st.info("ℹ️ Rename the file or re-upload to force new processing.")
 
         # -----------------------------------------------------------
         # CASE 3: Process New File
@@ -371,14 +385,13 @@ elif mode == "Video File":
                 if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                     os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
                     
-                    # ✅ SAVE STATS
                     st.session_state[stats_key] = {
                         "reps": logic.rep_quality_history,
                         "angles": angle_data,
                         "times": time_data
                     }
                     
-                    st.rerun() # ✅ Fixed here too
+                    st.rerun() 
                 
                 if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                 if os.path.exists(sanitized_input): os.remove(sanitized_input)
