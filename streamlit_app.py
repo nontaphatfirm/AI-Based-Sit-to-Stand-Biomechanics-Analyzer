@@ -76,7 +76,7 @@ class SitToStandLogic:
         # Initialize timer on first frame
         if self.start_time is None: self.start_time = time.time()
         
-        # Resize for performance
+        # Resize for performance (Standard mobile width)
         target_w = 640
         h, w, c = image.shape
         scale = target_w / w
@@ -215,35 +215,26 @@ class SitToStandLogic:
         # ------------------------------------------------------------------
         # 🎨 INTERFACE RESTORED (Original Top Bar Style)
         # ------------------------------------------------------------------
-        # Background Rectangle (Top)
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         
-        # UI Layout Coordinates
-        x_rep = 15
-        x_feed = int(target_w * 0.2)
-        x_acc = int(target_w * 0.65)
-        x_time = int(target_w * 0.85)
+        x_rep = 15; x_feed = int(target_w * 0.2); x_acc = int(target_w * 0.65); x_time = int(target_w * 0.85)
 
-        # 1. Reps
         cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255), 2)
         
-        # 2. Feedback
         cv2.putText(image, 'FEEDBACK', (x_feed,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, feedback, (x_feed,65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, feedback_color, 2)
         
-        # 3. Accuracy
         current_acc = 0.0
         if len(self.rep_quality_history) > 0: current_acc = (sum(self.rep_quality_history) / len(self.rep_quality_history)) * 100
         
         cv2.putText(image, 'ACC', (x_acc,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, f"{int(current_acc)}%", (x_acc,65), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
         
-        # 4. Time
         cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
         cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
         
-        # Debug: Show Active Leg (Small text below bar) [Optional but helpful]
+        # Debug: Show Active Leg
         cv2.putText(image, f"Active: {self.current_side}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
         return image, current_angle, current_time_seconds
@@ -255,28 +246,48 @@ st.set_page_config(page_title="STS Analyzer", layout="wide")
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
+# 1. Initialize Session State for Webcam Data
+if "webcam_results" not in st.session_state:
+    st.session_state["webcam_results"] = None
+
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
 if mode == "Webcam (Live)":
     class VideoProcessor(VideoTransformerBase):
         def __init__(self): 
             self.logic = SitToStandLogic()
+            self.angle_history = []
+            self.time_history = []
         
         def recv(self, frame):
             try:
                 time.sleep(0.01) # Yield CPU
                 img = frame.to_ndarray(format="bgr24")
                 img = cv2.flip(img, 1) # Mirror
-                processed_img, _, _ = self.logic.process_frame(img)
+                
+                # Process
+                processed_img, angle, timestamp = self.logic.process_frame(img)
+                
+                # Record Data
+                self.angle_history.append(angle)
+                self.time_history.append(timestamp)
+                
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
             except Exception as e:
                 return frame
+        
+        def get_stats(self):
+            return {
+                "rep_quality_history": self.logic.rep_quality_history,
+                "angle_history": self.angle_history,
+                "time_history": self.time_history
+            }
 
-    st.info("💡 Instructions: Click 'START'. If WiFi fails, try using Mobile Hotspot.")
+    st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     
     # Auto-TURN Config
     ctx = webrtc_streamer(
-        key="sts-webcam-restored-v15",
+        key="sts-webcam-final-v16",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={
@@ -285,6 +296,53 @@ if mode == "Webcam (Live)":
         },
         async_processing=True,
     )
+
+    # 📊 Logic to capture data AFTER stop
+    if ctx.video_processor:
+        # Save data while running
+        st.session_state["webcam_results"] = ctx.video_processor.get_stats()
+
+    # If stream stopped AND we have data -> Show Graphs
+    if not ctx.state.playing and st.session_state["webcam_results"]:
+        data = st.session_state["webcam_results"]
+        rep_history = data["rep_quality_history"]
+        angle_hist = data["angle_history"]
+        time_hist = data["time_history"]
+        
+        if len(rep_history) > 0 or len(angle_hist) > 0:
+            st.divider()
+            st.subheader("📊 Session Summary (Webcam)")
+            
+            total_reps = len(rep_history)
+            correct_reps = sum(rep_history)
+            accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Reps", total_reps)
+            col2.metric("Good Form", correct_reps)
+            col3.metric("Accuracy", f"{accuracy:.1f}%")
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+            
+            # Graph 1
+            ax1.plot(time_hist, angle_hist, label='Knee Angle', color='blue')
+            ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
+            ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
+            ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
+            
+            # Graph 2
+            labels = ['Correct', 'Incorrect']
+            counts = [correct_reps, total_reps - correct_reps]
+            bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
+            ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
+            for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
+            
+            st.pyplot(fig)
+            
+            # Clear state button
+            if st.button("Start New Session"):
+                st.session_state["webcam_results"] = None
+                st.experimental_rerun()
 
 elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
