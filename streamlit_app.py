@@ -243,17 +243,23 @@ mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=False):
     st.markdown(
         """
-        ### 📸 Camera Positioning (Crucial!)
-        For the best AI analysis, please set up your camera as follows:
-        1.  **🧍 Side View:** Turn your body **sideways** (Side Profile) to the camera.
-        2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe**.
-        3.  **📐 Angle:** You can stand slightly angled (45°), but a direct side view is best.
+        ### 📸 Optimal Camera Positioning
+        Our AI uses **3D Motion Analysis**, allowing it to track you from various angles. However, for the best results:
         
+        1.  **📐 The "Sweet Spot" (45°):** Stand diagonally (approx. 45°) to the camera.
+            * *Why?* This allows the AI to accurately measure **BOTH** your **Knee Angle** (for counting) and **Stance Width** (for posture check).
+        2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe** at all times.
+        3.  **💡 Lighting:** Use a well-lit room and avoid wearing clothes that blend into the background.
+        
+        
+
         ---
-        ### 📝 Instructions
-        * **Webcam:** Click **"Allow"** browser permission → Select Device → Click **"START"**.
-        * **Video File:** Upload a video (`.mp4`) recorded with the positioning above.
-        * **Troubleshooting:** If the webcam freezes/fails, try using a **Mobile Hotspot**.
+        ### 📝 How to Use
+        * **Webcam:** 1. Click **"Allow"** for camera permission.
+            2. Click **"SELECT DEVICE"** to choose your camera (Front/Back).
+            3. Click **"START"** to begin.
+        * **Video File:** Upload a video (`.mp4`, max 200MB) recorded with the positioning above.
+        * **Troubleshooting:** If the webcam freezes or fails to load, please switch to a **Mobile Hotspot**.
         """
     )
 
