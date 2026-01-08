@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import gc  # ✅ เพิ่ม Garbage Collector
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -65,8 +66,6 @@ class SitToStandLogic:
         self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
         self.rep_quality_history = [] 
-        
-        # State Flags
         self.current_rep_error = False
         self.bad_posture_counter = 0
         self.incomplete_stand_counter = 0
@@ -75,10 +74,9 @@ class SitToStandLogic:
     def process_frame(self, image):
         if self.start_time is None: self.start_time = time.time()
         
-        # 🔧 Resize Logic (Standard 1280px width for HD)
-        target_w = 1280
+        # Resize Logic
+        target_w = 1280 
         h, w, c = image.shape
-        
         if w > target_w:
             scale = target_w / w
             new_h = int(h * scale)
@@ -87,13 +85,12 @@ class SitToStandLogic:
             target_w = w
             new_h = h
         
-        # Convert to RGB for MediaPipe
+        # Convert to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_rgb.flags.writeable = False
         results = self.pose.process(image_rgb)
         image.flags.writeable = True
         
-        # Defaults
         current_angle = 0
         feedback = "READY"
         feedback_color = (0, 255, 0)
@@ -196,18 +193,11 @@ class SitToStandLogic:
 
         # UI Overlay
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
-        
-        x_rep = 20
-        x_feed = int(target_w * 0.25)
-        x_acc = int(target_w * 0.65)
-        x_time = int(target_w * 0.85)
-
-        font_scale = 0.8 if target_w > 1000 else 0.6
-        font_thick = 2
+        x_rep = 20; x_feed = int(target_w * 0.25); x_acc = int(target_w * 0.65); x_time = int(target_w * 0.85)
+        font_scale = 0.8 if target_w > 1000 else 0.6; font_thick = 2
 
         cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
         cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*2, (255,255,255), font_thick)
-        
         cv2.putText(image, 'FEEDBACK', (x_feed,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
         cv2.putText(image, feedback, (x_feed,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale, feedback_color, font_thick)
         
@@ -216,12 +206,9 @@ class SitToStandLogic:
         
         cv2.putText(image, 'ACC', (x_acc,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
         cv2.putText(image, f"{int(current_acc)}%", (x_acc,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*1.5, (255,255,255), font_thick)
-        
         cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
         cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*1.2, (255,255,255), font_thick)
-        
         cv2.putText(image, f"Active: {self.current_side}", (20, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-        
         return image, current_angle, current_time_seconds
 
 # ==========================================
@@ -242,24 +229,16 @@ if mode == "Webcam (Live)":
             self.logic = SitToStandLogic()
             self.angle_history = []
             self.time_history = []
-            # 🚫 No video recording to save RAM
         
         def recv(self, frame):
             try:
-                # time.sleep(0.01)
                 img = frame.to_ndarray(format="bgr24")
                 img = cv2.flip(img, 1) # Mirror
-                
-                # Process
                 processed_img, angle, timestamp = self.logic.process_frame(img)
-                
-                # Record Stats Only
                 self.angle_history.append(angle)
                 self.time_history.append(timestamp)
-                
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-            except Exception as e:
-                return frame
+            except Exception: return frame
         
         def get_stats(self):
             return {
@@ -270,23 +249,17 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     
-    # 🔧 High Resolution Stream (1280x720)
     ctx = webrtc_streamer(
-        key="sts-webcam-lightweight-v24", 
+        key="sts-webcam-safe-v25", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
-        media_stream_constraints={
-            "video": {"width": 1280, "height": 720, "frameRate": 30},
-            "audio": False
-        },
+        media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
         async_processing=True,
     )
 
-    # Logic to capture data AFTER stop
     if ctx.video_processor:
         st.session_state["webcam_results"] = ctx.video_processor.get_stats()
 
-    # If stream stopped AND we have data -> Show Graphs ONLY
     if not ctx.state.playing and st.session_state["webcam_results"]:
         data = st.session_state["webcam_results"]
         rep_history = data["rep_quality_history"]
@@ -294,18 +267,15 @@ if mode == "Webcam (Live)":
         if len(rep_history) > 0 or len(data["angle_history"]) > 0:
             st.divider()
             st.subheader("📊 Session Summary")
-            
             total_reps = len(rep_history)
             correct_reps = sum(rep_history)
             accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
-            
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Reps", total_reps)
             col2.metric("Good Form", correct_reps)
             col3.metric("Accuracy", f"{accuracy:.1f}%")
             
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-            
             ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
             ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
             ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
@@ -317,125 +287,136 @@ if mode == "Webcam (Live)":
             for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
             
             st.pyplot(fig)
+            plt.close(fig) # ✅ CLEANUP 1: Close plot immediately
             
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
+                gc.collect() # ✅ CLEANUP 2: Force GC
                 st.rerun()
 
 elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # 1. Save uploaded file first
-        raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-        raw_tfile.write(uploaded_file.read())
-        raw_tfile.close() # Close to ensure flush
-        
-        # ========================================================
-        # 🔧 AUTO-FIX INPUT: Convert ANY format to Clean H.264
-        # ========================================================
-        sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-        st.info("🔄 Converting video format for compatibility... (This may take a moment)")
-        
-        # Use ffmpeg to force convert input to standard H.264
-        # This fixes 'AxiosError' related to corrupt headers or H.265/HEVC from phones
-        os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
-        
-        # Use the sanitized file for OpenCV
-        cap = cv2.VideoCapture(sanitized_input)
-        
-        if not cap.isOpened():
-            st.error("Error: Could not open video file even after conversion.")
-        else:
-            # 2. Setup Video Writer
-            logic = SitToStandLogic()
-            angle_data = []; time_data = []
-            
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            
-            temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            
-            # ✅ Output dimensions handling
-            target_w = 1280 
-            original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            
-            if original_w > target_w:
-                scale = target_w / original_w
-                target_h = int(original_h * scale)
-            else:
-                target_w = original_w
-                target_h = original_h
-            
-            # Initialize Writer
-            out = None
-            frame_count = 0
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            st.info("⏳ Analyzing video frames...")
-            
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret: break
-                
-                processed_img, angle, timestamp = logic.process_frame(frame)
-                
-                # Lazy Initialize Writer (Ensure size match)
-                if out is None:
-                    h, w = processed_img.shape[:2]
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    out = cv2.VideoWriter(temp_output.name, fourcc, fps, (w, h))
-                
-                out.write(processed_img)
-                angle_data.append(angle)
-                time_data.append(timestamp)
-                
-                frame_count += 1
-                if total_frames > 0:
-                    progress = min(frame_count / total_frames, 1.0)
-                    progress_bar.progress(progress)
-                    status_text.text(f"Processing frame {frame_count}/{total_frames}")
+        # 🧠 CLEANUP: Remove old files if any
+        if "processed_video_path" in st.session_state and st.session_state["processed_video_path"]:
+            if os.path.exists(st.session_state["processed_video_path"]):
+                try: os.remove(st.session_state["processed_video_path"])
+                except: pass
 
-            cap.release()
-            if out: out.release()
+        file_id = f"{uploaded_file.name}-{uploaded_file.size}"
+        
+        if "last_processed_id" not in st.session_state:
+            st.session_state["last_processed_id"] = None
+            st.session_state["processed_video_path"] = None
+            st.session_state["processed_stats"] = None
+
+        is_new_file = st.session_state["last_processed_id"] != file_id
+
+        if is_new_file:
+            raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
+            raw_tfile.write(uploaded_file.read())
+            raw_tfile.close()
             
-            progress_bar.empty()
-            status_text.empty()
+            sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+            st.info("🔄 Optimizing video format...")
             
-            # ⚙️ CONVERT OUTPUT TO H.264 (For Browser Playback)
-            converted_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+            # Sanitizer
+            os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
             
-            # Check if output file exists and is valid
-            if os.path.exists(temp_output.name) and os.path.getsize(temp_output.name) > 1000:
-                os.system(f"ffmpeg -y -i {temp_output.name} -vcodec libx264 {converted_output.name} -hide_banner -loglevel error")
-                
-                st.success("✅ Analysis Complete!")
-                st.subheader("🎬 Analyzed Video")
-                st.video(converted_output.name)
-                
-                # Add Download Button
-                with open(converted_output.name, "rb") as file:
-                    st.download_button(label="Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
+            cap = cv2.VideoCapture(sanitized_input)
+            
+            if not cap.isOpened():
+                st.error("Error: Could not open video file.")
             else:
-                st.error("Error: Video processing failed. The output file was empty.")
+                logic = SitToStandLogic()
+                angle_data = []; time_data = []
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                
+                target_w = 1280 
+                original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                if original_w > target_w:
+                    scale = target_w / original_w
+                    target_h = int(original_h * scale)
+                else: target_w = original_w; target_h = original_h
+                
+                out = None
+                frame_count = 0
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                status_text.info("⏳ Analyzing video frames...")
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret: break
+                    
+                    processed_img, angle, timestamp = logic.process_frame(frame)
+                    
+                    if out is None:
+                        h, w = processed_img.shape[:2]
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                        out = cv2.VideoWriter(temp_output.name, fourcc, fps, (w, h))
+                    
+                    out.write(processed_img)
+                    angle_data.append(angle)
+                    time_data.append(timestamp)
+                    
+                    frame_count += 1
+                    if total_frames > 0:
+                        progress = min(frame_count / total_frames, 1.0)
+                        progress_bar.progress(progress)
+
+                cap.release()
+                if out: out.release()
+                progress_bar.empty()
+                status_text.empty()
+                
+                converted_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                final_video_path = temp_output.name
+                
+                if os.path.exists(temp_output.name) and os.path.getsize(temp_output.name) > 1000:
+                    os.system(f"ffmpeg -y -i {temp_output.name} -vcodec libx264 {converted_output.name} -hide_banner -loglevel error")
+                    final_video_path = converted_output.name
+                
+                st.session_state["last_processed_id"] = file_id
+                st.session_state["processed_video_path"] = final_video_path
+                st.session_state["processed_stats"] = {
+                    "reps": logic.rep_quality_history,
+                    "angles": angle_data,
+                    "times": time_data
+                }
+                
+                # ✅ CLEANUP 3: Remove intermediate files immediately
+                if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
+                if os.path.exists(sanitized_input): os.remove(sanitized_input)
+                if os.path.exists(temp_output.name) and temp_output.name != final_video_path: os.remove(temp_output.name)
+                gc.collect() # Force GC
+
+        if st.session_state["processed_video_path"]:
+            final_path = st.session_state["processed_video_path"]
+            stats = st.session_state["processed_stats"]
+            st.success("✅ Analysis Complete!")
+            st.subheader("🎬 Analyzed Video")
+            st.video(final_path)
+            
+            with open(final_path, "rb") as file:
+                st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
 
             st.divider()
             st.subheader("📊 Summary Report")
-            
-            total_reps = len(logic.rep_quality_history)
-            correct_reps = sum(logic.rep_quality_history)
+            total_reps = len(stats["reps"])
+            correct_reps = sum(stats["reps"])
             accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
-            
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Reps", total_reps)
             col2.metric("Good Form", correct_reps)
             col3.metric("Accuracy", f"{accuracy:.1f}%")
             
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-            ax1.plot(time_data, angle_data, label='Knee Angle', color='blue')
+            ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
             ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
             ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
             ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
@@ -444,3 +425,4 @@ elif mode == "Video File":
             ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
             for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
             st.pyplot(fig)
+            plt.close(fig) # ✅ CLEANUP 4: Close plot
