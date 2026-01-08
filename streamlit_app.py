@@ -55,7 +55,7 @@ def calculate_vertical_angle(a, b):
     return np.degrees(np.arctan2(abs(a[0] - b[0]), abs(a[1] - b[1])))
 
 # ==========================================
-# 🧠 Logic Class (Smart Leg + Original UI)
+# 🧠 Logic Class
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
@@ -73,11 +73,10 @@ class SitToStandLogic:
         self.current_side = "AUTO"
 
     def process_frame(self, image):
-        # Initialize timer on first frame
         if self.start_time is None: self.start_time = time.time()
         
-        # 🔧 Fix 1: Resize for performance but keep HD Quality
-        target_w = 1280 
+        # 🔧 Resize Logic (Standard 1280px width for HD)
+        target_w = 1280
         h, w, c = image.shape
         
         if w > target_w:
@@ -97,7 +96,7 @@ class SitToStandLogic:
         # Defaults
         current_angle = 0
         feedback = "READY"
-        feedback_color = (0, 255, 0) # Green
+        feedback_color = (0, 255, 0)
         current_time_seconds = time.time() - self.start_time
 
         if results.pose_landmarks:
@@ -107,25 +106,20 @@ class SitToStandLogic:
                 # --- Smart Leg Logic ---
                 def get_raw(lm): return [lm.x, lm.y]
                 
-                # Get Landmarks for both sides
                 l_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
                 l_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value]
                 r_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
                 r_knee = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value]
 
-                # Calculate Apparent Thigh Length
                 len_thigh_left = math.hypot(l_knee.x - l_hip.x, l_knee.y - l_hip.y)
                 len_thigh_right = math.hypot(r_knee.x - r_hip.x, r_knee.y - r_hip.y)
 
-                # Get Visibility
                 vis_left = (l_hip.visibility + l_knee.visibility) / 2
                 vis_right = (r_hip.visibility + r_knee.visibility) / 2
 
-                # Scoring
                 score_left = (len_thigh_left * 3.0) + vis_left
                 score_right = (len_thigh_right * 3.0) + vis_right
 
-                # Select Best Side
                 if score_left > score_right:
                     self.current_side = "LEFT"
                     hip_idx, knee_idx, ankle_idx, shoulder_idx = 23, 25, 27, 11
@@ -133,25 +127,21 @@ class SitToStandLogic:
                     self.current_side = "RIGHT"
                     hip_idx, knee_idx, ankle_idx, shoulder_idx = 24, 26, 28, 12
 
-                # Check Visibility of Selected Leg
                 selected_knee_vis = landmarks[knee_idx].visibility
                 
                 if selected_knee_vis < VISIBILITY_THRESHOLD:
                     feedback = "LOW VISIBILITY"; feedback_color = (0, 0, 255)
                 else:
-                    # Extract Keypoints
                     hip_raw = get_raw(landmarks[hip_idx])
                     knee_raw = get_raw(landmarks[knee_idx])
                     ankle_raw = get_raw(landmarks[ankle_idx])
                     shoulder_raw = get_raw(landmarks[shoulder_idx])
                     
-                    # For Stance Check (Need Both)
                     r_shoulder_raw = get_raw(landmarks[12])
                     l_shoulder_raw = get_raw(landmarks[11])
                     r_ankle_raw = get_raw(landmarks[28])
                     l_ankle_raw = get_raw(landmarks[27])
 
-                    # Calculate Angles
                     raw_angle = calculate_angle(hip_raw, knee_raw, ankle_raw)
                     self.angle_buffer.append(raw_angle)
                     current_angle = sum(self.angle_buffer) / len(self.angle_buffer)
@@ -161,13 +151,11 @@ class SitToStandLogic:
                     feet_width = calculate_distance(l_ankle_raw, r_ankle_raw)
                     stance_ratio = 0 if shoulder_width == 0 else feet_width / shoulder_width
 
-                    # Draw Angle
                     knee_px = tuple(np.multiply(knee_raw, [target_w, new_h]).astype(int))
                     cv2.putText(image, str(int(current_angle)), knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-                    # --- SAFETY CHECK ---
+                    # Posture Checks
                     potential_bad_posture = False; temp_feedback = ""
-                    
                     if stance_ratio < MIN_FEET_RATIO and current_angle > 150: 
                         potential_bad_posture = True; temp_feedback = "NARROW STANCE!"
                     elif stance_ratio > MAX_FEET_RATIO and current_angle > 150: 
@@ -183,7 +171,6 @@ class SitToStandLogic:
                     if potential_inc: self.incomplete_stand_counter += 1
                     else: self.incomplete_stand_counter = 0
 
-                    # Decision
                     if self.bad_posture_counter > BAD_POSTURE_DELAY:
                         feedback = temp_feedback; feedback_color = (0, 0, 255); self.current_rep_error = True 
                     elif self.incomplete_stand_counter > INCOMPLETE_STAND_DELAY:
@@ -191,24 +178,23 @@ class SitToStandLogic:
                     else:
                         feedback = "GOOD FORM"; feedback_color = (0, 255, 0)
 
-                    # --- REPETITION COUNTING ---
+                    # Counting
                     if current_angle > 160: 
                         self.stage = "up"
                         if feedback == "GOOD FORM": 
                             self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
                     
                     if current_angle < 85 and self.stage == 'up':
-                        self.stage = "down"
-                        self.counter += 1
+                        self.stage = "down"; self.counter += 1
                         if not self.current_rep_error: self.rep_quality_history.append(1) 
                         else: self.rep_quality_history.append(0) 
                         self.current_rep_error = False 
 
-            except Exception as e: pass
+            except Exception: pass
 
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # --- UI Overlay ---
+        # UI Overlay (Original Style)
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         
         x_rep = 20
@@ -216,7 +202,6 @@ class SitToStandLogic:
         x_acc = int(target_w * 0.65)
         x_time = int(target_w * 0.85)
 
-        # Adjust font size for HD
         font_scale = 0.8 if target_w > 1000 else 0.6
         font_thick = 2
 
@@ -235,7 +220,6 @@ class SitToStandLogic:
         cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
         cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*1.2, (255,255,255), font_thick)
         
-        # Debug: Show Active Leg
         cv2.putText(image, f"Active: {self.current_side}", (20, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
         
         return image, current_angle, current_time_seconds
@@ -247,7 +231,6 @@ st.set_page_config(page_title="STS Analyzer", layout="wide")
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
-# 1. Initialize Session State for Webcam Data
 if "webcam_results" not in st.session_state:
     st.session_state["webcam_results"] = None
 
@@ -259,18 +242,18 @@ if mode == "Webcam (Live)":
             self.logic = SitToStandLogic()
             self.angle_history = []
             self.time_history = []
-            # 🚫 REMOVED VIDEO RECORDING TO SAVE RAM
+            # 🚫 No video recording to save RAM
         
         def recv(self, frame):
             try:
-                # time.sleep(0.01) # Yield CPU not needed
+                # time.sleep(0.01)
                 img = frame.to_ndarray(format="bgr24")
                 img = cv2.flip(img, 1) # Mirror
                 
                 # Process
                 processed_img, angle, timestamp = self.logic.process_frame(img)
                 
-                # Record Stats Only (No Video Frames)
+                # Record Stats Only
                 self.angle_history.append(angle)
                 self.time_history.append(timestamp)
                 
@@ -283,14 +266,13 @@ if mode == "Webcam (Live)":
                 "rep_quality_history": self.logic.rep_quality_history,
                 "angle_history": self.angle_history,
                 "time_history": self.time_history
-                # No video path
             }
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     
     # 🔧 High Resolution Stream (1280x720)
     ctx = webrtc_streamer(
-        key="sts-webcam-lightweight-v22", 
+        key="sts-webcam-lightweight-v24", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={
@@ -351,41 +333,35 @@ elif mode == "Video File":
         if not cap.isOpened():
             st.error("Error: Could not open video file.")
         else:
-            # 1. Setup Video Writer
             logic = SitToStandLogic()
             angle_data = []; time_data = []
             
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             
-            # Create Temp Output
             temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             
-            # Match dimensions
-            target_w = 640
-            original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            scale = target_w / original_w
-            target_h = int(original_h * scale)
+            # ✅ FIX: Initialize VideoWriter inside the loop to match exact dimensions
+            out = None
+            frame_count = 0
             
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-            out = cv2.VideoWriter(temp_output.name, fourcc, fps, (target_w, target_h))
-
-            # 2. UI Elements
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
             st.info("⏳ Processing video... Please wait.")
             
-            # 3. Process Loop
-            frame_count = 0
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret: break
                 
                 processed_img, angle, timestamp = logic.process_frame(frame)
-                out.write(processed_img)
                 
+                # Initialize Writer Once using the actual processed frame size
+                if out is None:
+                    h, w = processed_img.shape[:2]
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(temp_output.name, fourcc, fps, (w, h))
+                
+                out.write(processed_img)
                 angle_data.append(angle)
                 time_data.append(timestamp)
                 
@@ -395,24 +371,29 @@ elif mode == "Video File":
                     progress_bar.progress(progress)
                     status_text.text(f"Processing frame {frame_count}/{total_frames}")
 
-            # 4. Cleanup & Converter
             cap.release()
-            out.release()
+            if out: out.release()
+            
             progress_bar.empty()
             status_text.empty()
             
-            # ⚙️ CONVERT TO H.264 (Fixes black screen in browser)
+            # ⚙️ CONVERT TO H.264
             converted_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            os.system(f"ffmpeg -y -i {temp_output.name} -vcodec libx264 {converted_output.name}")
+            
+            # Check if file exists and has size
+            if os.path.exists(temp_output.name) and os.path.getsize(temp_output.name) > 0:
+                os.system(f"ffmpeg -y -i {temp_output.name} -vcodec libx264 {converted_output.name} -hide_banner -loglevel error")
+                
+                st.success("✅ Analysis Complete!")
+                st.subheader("🎬 Analyzed Video")
+                st.video(converted_output.name)
+                
+                # Add Download Button
+                with open(converted_output.name, "rb") as file:
+                    st.download_button(label="Download Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
+            else:
+                st.error("Error: Video processing failed (Output file is empty).")
 
-            # ==========================================
-            # 📊 Show Results
-            # ==========================================
-            st.success("✅ Analysis Complete!")
-            
-            st.subheader("🎬 Analyzed Video")
-            st.video(converted_output.name)
-            
             st.divider()
             st.subheader("📊 Summary Report")
             
