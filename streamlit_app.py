@@ -76,12 +76,17 @@ class SitToStandLogic:
         # Initialize timer on first frame
         if self.start_time is None: self.start_time = time.time()
         
-        # Resize for performance
-        target_w = 640
+        # 🔧 Fix 1: Resize for performance but keep HD Quality
+        target_w = 1280 
         h, w, c = image.shape
-        scale = target_w / w
-        new_h = int(h * scale)
-        image = cv2.resize(image, (target_w, new_h))
+        
+        if w > target_w:
+            scale = target_w / w
+            new_h = int(h * scale)
+            image = cv2.resize(image, (target_w, new_h))
+        else:
+            target_w = w
+            new_h = h
         
         # Convert to RGB for MediaPipe
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -99,9 +104,7 @@ class SitToStandLogic:
             try:
                 landmarks = results.pose_landmarks.landmark
                 
-                # =========================================================
-                # 🧠 SMART LEG SELECTION (Longest Thigh Logic)
-                # =========================================================
+                # --- Smart Leg Logic ---
                 def get_raw(lm): return [lm.x, lm.y]
                 
                 # Get Landmarks for both sides
@@ -110,7 +113,7 @@ class SitToStandLogic:
                 r_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
                 r_knee = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value]
 
-                # Calculate Apparent Thigh Length (2D Projection)
+                # Calculate Apparent Thigh Length
                 len_thigh_left = math.hypot(l_knee.x - l_hip.x, l_knee.y - l_hip.y)
                 len_thigh_right = math.hypot(r_knee.x - r_hip.x, r_knee.y - r_hip.y)
 
@@ -118,24 +121,17 @@ class SitToStandLogic:
                 vis_left = (l_hip.visibility + l_knee.visibility) / 2
                 vis_right = (r_hip.visibility + r_knee.visibility) / 2
 
-                # Scoring: Weight Length 80%, Visibility 20%
+                # Scoring
                 score_left = (len_thigh_left * 3.0) + vis_left
                 score_right = (len_thigh_right * 3.0) + vis_right
 
                 # Select Best Side
                 if score_left > score_right:
                     self.current_side = "LEFT"
-                    hip_idx = mp_pose.PoseLandmark.LEFT_HIP.value
-                    knee_idx = mp_pose.PoseLandmark.LEFT_KNEE.value
-                    ankle_idx = mp_pose.PoseLandmark.LEFT_ANKLE.value
-                    shoulder_idx = mp_pose.PoseLandmark.LEFT_SHOULDER.value
+                    hip_idx, knee_idx, ankle_idx, shoulder_idx = 23, 25, 27, 11
                 else:
                     self.current_side = "RIGHT"
-                    hip_idx = mp_pose.PoseLandmark.RIGHT_HIP.value
-                    knee_idx = mp_pose.PoseLandmark.RIGHT_KNEE.value
-                    ankle_idx = mp_pose.PoseLandmark.RIGHT_ANKLE.value
-                    shoulder_idx = mp_pose.PoseLandmark.RIGHT_SHOULDER.value
-                # =========================================================
+                    hip_idx, knee_idx, ankle_idx, shoulder_idx = 24, 26, 28, 12
 
                 # Check Visibility of Selected Leg
                 selected_knee_vis = landmarks[knee_idx].visibility
@@ -150,10 +146,10 @@ class SitToStandLogic:
                     shoulder_raw = get_raw(landmarks[shoulder_idx])
                     
                     # For Stance Check (Need Both)
-                    r_shoulder_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value])
-                    l_shoulder_raw = get_raw(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value])
-                    r_ankle_raw = get_raw(landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value])
-                    l_ankle_raw = get_raw(landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value])
+                    r_shoulder_raw = get_raw(landmarks[12])
+                    l_shoulder_raw = get_raw(landmarks[11])
+                    r_ankle_raw = get_raw(landmarks[28])
+                    l_ankle_raw = get_raw(landmarks[27])
 
                     # Calculate Angles
                     raw_angle = calculate_angle(hip_raw, knee_raw, ankle_raw)
@@ -167,7 +163,7 @@ class SitToStandLogic:
 
                     # Draw Angle
                     knee_px = tuple(np.multiply(knee_raw, [target_w, new_h]).astype(int))
-                    cv2.putText(image, str(int(current_angle)), knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.putText(image, str(int(current_angle)), knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
                     # --- SAFETY CHECK ---
                     potential_bad_posture = False; temp_feedback = ""
@@ -212,33 +208,35 @@ class SitToStandLogic:
 
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # ------------------------------------------------------------------
-        # 🎨 INTERFACE RESTORED (Original Top Bar Style)
-        # ------------------------------------------------------------------
+        # --- UI Overlay ---
         cv2.rectangle(image, (0,0), (target_w, 85), (245,117,16), -1)
         
-        x_rep = 15
-        x_feed = int(target_w * 0.2)
+        x_rep = 20
+        x_feed = int(target_w * 0.25)
         x_acc = int(target_w * 0.65)
         x_time = int(target_w * 0.85)
 
-        cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
-        cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255), 2)
+        # Adjust font size for HD
+        font_scale = 0.8 if target_w > 1000 else 0.6
+        font_thick = 2
+
+        cv2.putText(image, 'REPS', (x_rep,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
+        cv2.putText(image, str(self.counter), (x_rep-5,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*2, (255,255,255), font_thick)
         
-        cv2.putText(image, 'FEEDBACK', (x_feed,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
-        cv2.putText(image, feedback, (x_feed,65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, feedback_color, 2)
+        cv2.putText(image, 'FEEDBACK', (x_feed,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
+        cv2.putText(image, feedback, (x_feed,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale, feedback_color, font_thick)
         
         current_acc = 0.0
         if len(self.rep_quality_history) > 0: current_acc = (sum(self.rep_quality_history) / len(self.rep_quality_history)) * 100
         
-        cv2.putText(image, 'ACC', (x_acc,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
-        cv2.putText(image, f"{int(current_acc)}%", (x_acc,65), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
+        cv2.putText(image, 'ACC', (x_acc,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
+        cv2.putText(image, f"{int(current_acc)}%", (x_acc,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*1.5, (255,255,255), font_thick)
         
-        cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 1)
-        cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+        cv2.putText(image, 'TIME', (x_time,25), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0,0,0), 1)
+        cv2.putText(image, f"{current_time_seconds:.1f}s", (x_time,65), cv2.FONT_HERSHEY_SIMPLEX, font_scale*1.2, (255,255,255), font_thick)
         
         # Debug: Show Active Leg
-        cv2.putText(image, f"Active: {self.current_side}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        cv2.putText(image, f"Active: {self.current_side}", (20, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
         
         return image, current_angle, current_time_seconds
 
@@ -261,17 +259,18 @@ if mode == "Webcam (Live)":
             self.logic = SitToStandLogic()
             self.angle_history = []
             self.time_history = []
+            # 🚫 REMOVED VIDEO RECORDING TO SAVE RAM
         
         def recv(self, frame):
             try:
-                time.sleep(0.01) # Yield CPU
+                # time.sleep(0.01) # Yield CPU not needed
                 img = frame.to_ndarray(format="bgr24")
                 img = cv2.flip(img, 1) # Mirror
                 
                 # Process
                 processed_img, angle, timestamp = self.logic.process_frame(img)
                 
-                # Record Data
+                # Record Stats Only (No Video Frames)
                 self.angle_history.append(angle)
                 self.time_history.append(timestamp)
                 
@@ -284,37 +283,35 @@ if mode == "Webcam (Live)":
                 "rep_quality_history": self.logic.rep_quality_history,
                 "angle_history": self.angle_history,
                 "time_history": self.time_history
+                # No video path
             }
 
-    st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results. If WiFi fails, try using Mobile Hotspot.")
+    st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     
-    # Auto-TURN Config
+    # 🔧 High Resolution Stream (1280x720)
     ctx = webrtc_streamer(
-        key="sts-webcam-final-v17", # Key ใหม่
+        key="sts-webcam-lightweight-v22", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={
-            "video": {"width": 1280, "height": 960, "frameRate": 30},
+            "video": {"width": 1280, "height": 720, "frameRate": 30},
             "audio": False
         },
         async_processing=True,
     )
 
-    # 📊 Logic to capture data AFTER stop
+    # Logic to capture data AFTER stop
     if ctx.video_processor:
-        # Save data while running
         st.session_state["webcam_results"] = ctx.video_processor.get_stats()
 
-    # If stream stopped AND we have data -> Show Graphs
+    # If stream stopped AND we have data -> Show Graphs ONLY
     if not ctx.state.playing and st.session_state["webcam_results"]:
         data = st.session_state["webcam_results"]
         rep_history = data["rep_quality_history"]
-        angle_hist = data["angle_history"]
-        time_hist = data["time_history"]
         
-        if len(rep_history) > 0 or len(angle_hist) > 0:
+        if len(rep_history) > 0 or len(data["angle_history"]) > 0:
             st.divider()
-            st.subheader("📊 Session Summary (Webcam)")
+            st.subheader("📊 Session Summary")
             
             total_reps = len(rep_history)
             correct_reps = sum(rep_history)
@@ -327,25 +324,21 @@ if mode == "Webcam (Live)":
             
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
             
-            # Graph 1
-            ax1.plot(time_hist, angle_hist, label='Knee Angle', color='blue')
+            ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
             ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
             ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
             ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
             
-            # Graph 2
-            labels = ['Correct', 'Incorrect']
-            counts = [correct_reps, total_reps - correct_reps]
+            labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
             bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
             ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
             for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
             
             st.pyplot(fig)
             
-            # Clear state button (Fixed)
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
-                st.rerun() # ✅ Fixed: Using st.rerun() instead of experimental_rerun()
+                st.rerun()
 
 elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
