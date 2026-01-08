@@ -216,7 +216,7 @@ if mode == "Webcam (Live)":
                 "time_history": self.time_history
             }
 
-    st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
+    st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results. 🛜 If WiFi fails, try using Mobile Hotspot.")
     ctx = webrtc_streamer(
         key="sts-webcam-safe-v32", 
         mode=WebRtcMode.SENDRECV,
