@@ -280,150 +280,155 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # Hashing logic
-        uploaded_file.seek(0)
-        file_bytes = uploaded_file.read(2 * 1024 * 1024) 
-        file_hash = hashlib.md5(file_bytes).hexdigest()
-        uploaded_file.seek(0) 
-
-        session_id = st.session_state["user_session_id"]
-        file_id = f"{session_id}_{file_hash}"
+        # -----------------------------------------------------------
+        # 🚫 LIMIT CHECK: 200 MB (200 * 1024 * 1024 bytes)
+        # -----------------------------------------------------------
+        MAX_FILE_SIZE = 200 * 1024 * 1024
         
-        output_filename = f"processed_{file_id}.mp4"
-        output_path = os.path.join(tempfile.gettempdir(), output_filename)
-        stats_key = f"stats_{file_id}"
-
-        # -----------------------------------------------------------
-        # CASE 1: Load from Cache
-        # -----------------------------------------------------------
-        if os.path.exists(output_path) and stats_key in st.session_state:
-            stats = st.session_state[stats_key]
-            
-            # ✅ CHECK FLAG: Just processed or loaded?
-            if st.session_state.get("just_processed") == file_id:
-                st.success("✅ Analysis Complete!")
-                del st.session_state["just_processed"] # Reset flag
-            else:
-                st.success("✅ Analysis Complete! (Loaded from Cache)")
-
-            st.subheader("🎬 Analyzed Video")
-            st.video(output_path)
-            with open(output_path, "rb") as file:
-                st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
-
-            st.divider()
-            st.subheader("📊 Summary Report")
-            total_reps = len(stats["reps"])
-            correct_reps = sum(stats["reps"])
-            accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Reps", total_reps)
-            col2.metric("Good Form", correct_reps)
-            col3.metric("Accuracy", f"{accuracy:.1f}%")
-            
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-            ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
-            ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
-            ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
-            ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
-            labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
-            bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
-            ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
-            for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
-            st.pyplot(fig)
-            plt.close(fig)
-
-        # -----------------------------------------------------------
-        # CASE 2: Video exists but Stats missing (Rebooted)
-        # -----------------------------------------------------------
-        elif os.path.exists(output_path) and stats_key not in st.session_state:
-             st.success("✅ Analysis Loaded from Cache!")
-             st.video(output_path)
-             with open(output_path, "rb") as file:
-                st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
-             st.info("ℹ️ Rename the file or re-upload to force new processing.")
-
-        # -----------------------------------------------------------
-        # CASE 3: Process New File
-        # -----------------------------------------------------------
+        if uploaded_file.size > MAX_FILE_SIZE:
+            st.error(f"❌ File too large! Please upload a video smaller than 200MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
-            status_container = st.empty()
-            
-            with status_container.container():
-                with st.spinner("🔄 Optimizing video format... (Preparing for analysis)"):
-                    raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-                    raw_tfile.write(uploaded_file.read())
-                    raw_tfile.close()
-                    
-                    sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                    os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
-            
-            status_container.empty()
+            # ✅ Valid File -> Proceed with Hashing & Processing
+            uploaded_file.seek(0)
+            file_bytes = uploaded_file.read(2 * 1024 * 1024) 
+            file_hash = hashlib.md5(file_bytes).hexdigest()
+            uploaded_file.seek(0) 
 
-            cap = cv2.VideoCapture(sanitized_input)
+            session_id = st.session_state["user_session_id"]
+            file_id = f"{session_id}_{file_hash}"
             
-            if not cap.isOpened():
-                st.error("Error: Could not open video file.")
+            output_filename = f"processed_{file_id}.mp4"
+            output_path = os.path.join(tempfile.gettempdir(), output_filename)
+            stats_key = f"stats_{file_id}"
+
+            # -----------------------------------------------------------
+            # CASE 1: Load from Cache
+            # -----------------------------------------------------------
+            if os.path.exists(output_path) and stats_key in st.session_state:
+                stats = st.session_state[stats_key]
+                
+                if st.session_state.get("just_processed") == file_id:
+                    st.success("✅ Analysis Complete!")
+                    del st.session_state["just_processed"]
+                else:
+                    st.success("✅ Analysis Complete! (Loaded from Cache)")
+
+                st.subheader("🎬 Analyzed Video")
+                st.video(output_path)
+                with open(output_path, "rb") as file:
+                    st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
+
+                st.divider()
+                st.subheader("📊 Summary Report")
+                total_reps = len(stats["reps"])
+                correct_reps = sum(stats["reps"])
+                accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Reps", total_reps)
+                col2.metric("Good Form", correct_reps)
+                col3.metric("Accuracy", f"{accuracy:.1f}%")
+                
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+                ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
+                ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
+                ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
+                ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
+                labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
+                bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
+                ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
+                for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
+                st.pyplot(fig)
+                plt.close(fig)
+
+            # -----------------------------------------------------------
+            # CASE 2: Video exists but Stats missing (Rebooted)
+            # -----------------------------------------------------------
+            elif os.path.exists(output_path) and stats_key not in st.session_state:
+                 st.success("✅ Analysis Loaded from Cache!")
+                 st.video(output_path)
+                 with open(output_path, "rb") as file:
+                    st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
+                 st.info("ℹ️ Rename the file or re-upload to force new processing.")
+
+            # -----------------------------------------------------------
+            # CASE 3: Process New File
+            # -----------------------------------------------------------
             else:
-                logic = SitToStandLogic()
-                angle_data = []; time_data = []
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                status_container = st.empty()
                 
-                target_w = 1280 
-                original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                if original_w > target_w:
-                    scale = target_w / original_w
-                    target_h = int(original_h * scale)
-                else: target_w = original_w; target_h = original_h
+                with status_container.container():
+                    with st.spinner("🔄 Optimizing video format... (Preparing for analysis)"):
+                        raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
+                        raw_tfile.write(uploaded_file.read())
+                        raw_tfile.close()
+                        
+                        sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                        os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
                 
-                out = None
-                frame_count = 0
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-                progress_bar = status_container.progress(0, text="Analyzing video frames... 0%")
-                
-                while cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret: break
-                    processed_img, angle, timestamp = logic.process_frame(frame)
-                    
-                    if out is None:
-                        h, w = processed_img.shape[:2]
-                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                        out = cv2.VideoWriter(temp_output, fourcc, fps, (w, h))
-                    
-                    out.write(processed_img)
-                    angle_data.append(angle)
-                    time_data.append(timestamp)
-                    frame_count += 1
-                    
-                    if total_frames > 0:
-                        progress = min(frame_count / total_frames, 1.0)
-                        percent_text = f"Analyzing video frames... {int(progress * 100)}%"
-                        progress_bar.progress(progress, text=percent_text)
-
-                cap.release()
-                if out: out.release()
                 status_container.empty()
+
+                cap = cv2.VideoCapture(sanitized_input)
                 
-                if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
-                    with st.spinner("💾 Finalizing video file..."):
-                         os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
+                if not cap.isOpened():
+                    st.error("Error: Could not open video file.")
+                else:
+                    logic = SitToStandLogic()
+                    angle_data = []; time_data = []
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
                     
-                    st.session_state[stats_key] = {
-                        "reps": logic.rep_quality_history,
-                        "angles": angle_data,
-                        "times": time_data
-                    }
+                    target_w = 1280 
+                    original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if original_w > target_w:
+                        scale = target_w / original_w
+                        target_h = int(original_h * scale)
+                    else: target_w = original_w; target_h = original_h
                     
-                    # ✅ SET FLAG: I just processed this file!
-                    st.session_state["just_processed"] = file_id
+                    out = None
+                    frame_count = 0
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+                    progress_bar = status_container.progress(0, text="Analyzing video frames... 0%")
                     
-                    st.rerun() 
-                
-                if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
-                if os.path.exists(sanitized_input): os.remove(sanitized_input)
-                if os.path.exists(temp_output): os.remove(temp_output)
-                gc.collect()
+                    while cap.isOpened():
+                        ret, frame = cap.read()
+                        if not ret: break
+                        processed_img, angle, timestamp = logic.process_frame(frame)
+                        
+                        if out is None:
+                            h, w = processed_img.shape[:2]
+                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                            out = cv2.VideoWriter(temp_output, fourcc, fps, (w, h))
+                        
+                        out.write(processed_img)
+                        angle_data.append(angle)
+                        time_data.append(timestamp)
+                        frame_count += 1
+                        
+                        if total_frames > 0:
+                            progress = min(frame_count / total_frames, 1.0)
+                            percent_text = f"Analyzing video frames... {int(progress * 100)}%"
+                            progress_bar.progress(progress, text=percent_text)
+
+                    cap.release()
+                    if out: out.release()
+                    status_container.empty()
+                    
+                    if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
+                        with st.spinner("💾 Finalizing video file..."):
+                             os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
+                        
+                        st.session_state[stats_key] = {
+                            "reps": logic.rep_quality_history,
+                            "angles": angle_data,
+                            "times": time_data
+                        }
+                        
+                        st.session_state["just_processed"] = file_id
+                        st.rerun() 
+                    
+                    if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
+                    if os.path.exists(sanitized_input): os.remove(sanitized_input)
+                    if os.path.exists(temp_output): os.remove(temp_output)
+                    gc.collect()
