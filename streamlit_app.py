@@ -40,12 +40,32 @@ INCOMPLETE_STAND_DELAY = 15
 # ==========================================
 # 📐 Helper Functions
 # ==========================================
+# ✅ 2D Angle (For visual checks like leaning)
 def calculate_angle(a, b, c):
     a = np.array(a); b = np.array(b); c = np.array(c)
     radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
     angle = np.abs(radians*180.0/np.pi)
     if angle > 180.0: angle = 360-angle
     return angle
+
+# ✅ 3D Angle (For accurate Knee bending regardless of camera angle)
+def calculate_angle_3d(a, b, c):
+    a = np.array(a) # [x, y, z]
+    b = np.array(b)
+    c = np.array(c)
+
+    # Create vectors
+    ba = a - b
+    bc = c - b
+
+    # Calculate cosine of angle using dot product
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    
+    # Clip to handle floating point errors
+    cosine_angle = np.clip(cosine_angle, -1.0, 1.0)
+    
+    angle = np.arccos(cosine_angle)
+    return np.degrees(angle)
 
 def calculate_distance(p1, p2):
     return math.hypot(p2[0]-p1[0], p2[1]-p1[1])
@@ -84,11 +104,16 @@ class SitToStandLogic:
         current_angle = 0; feedback = "READY"; feedback_color = (0, 255, 0)
         current_time_seconds = time.time() - self.start_time
 
-        if results.pose_landmarks:
+        if results.pose_landmarks and results.pose_world_landmarks: # ✅ Check for 3D landmarks
             try:
-                landmarks = results.pose_landmarks.landmark
-                def get_raw(lm): return [lm.x, lm.y]
+                landmarks = results.pose_landmarks.landmark      # 2D (Screen)
+                world_landmarks = results.pose_world_landmarks.landmark # 3D (Meters)
+
+                # --- Helpers ---
+                def get_2d(lm): return [lm.x, lm.y]
+                def get_3d(lm): return [lm.x, lm.y, lm.z] # Get Z-axis too!
                 
+                # --- Decide Left or Right (Based on 2D visibility) ---
                 l_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
                 l_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value]
                 r_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
@@ -107,34 +132,54 @@ class SitToStandLogic:
                     self.current_side = "RIGHT"; hip_idx, knee_idx, ankle_idx, shoulder_idx = 24, 26, 28, 12
 
                 selected_knee_vis = landmarks[knee_idx].visibility
+                
                 if selected_knee_vis < VISIBILITY_THRESHOLD:
                     feedback = "LOW VISIBILITY"; feedback_color = (0, 0, 255)
                 else:
-                    hip_raw = get_raw(landmarks[hip_idx])
-                    knee_raw = get_raw(landmarks[knee_idx])
-                    ankle_raw = get_raw(landmarks[ankle_idx])
-                    shoulder_raw = get_raw(landmarks[shoulder_idx])
-                    
-                    r_shoulder_raw = get_raw(landmarks[12])
-                    l_shoulder_raw = get_raw(landmarks[11])
-                    r_ankle_raw = get_raw(landmarks[28])
-                    l_ankle_raw = get_raw(landmarks[27])
+                    # --- Data Extraction ---
+                    # 1. Get 3D Points for Knee Angle (Corrects for 45 degree view)
+                    hip_3d = get_3d(world_landmarks[hip_idx])
+                    knee_3d = get_3d(world_landmarks[knee_idx])
+                    ankle_3d = get_3d(world_landmarks[ankle_idx])
 
-                    raw_angle = calculate_angle(hip_raw, knee_raw, ankle_raw)
+                    # 2. Get 2D Points for Visual Checks (Stance & Leaning)
+                    hip_2d = get_2d(landmarks[hip_idx])
+                    knee_2d = get_2d(landmarks[knee_idx])
+                    shoulder_2d = get_2d(landmarks[shoulder_idx])
+                    
+                    r_shoulder_2d = get_2d(landmarks[12])
+                    l_shoulder_2d = get_2d(landmarks[11])
+                    r_ankle_2d = get_2d(landmarks[28])
+                    l_ankle_2d = get_2d(landmarks[27])
+
+                    # --- Calculations ---
+                    # ✅ Use 3D Angle for Counting
+                    raw_angle = calculate_angle_3d(hip_3d, knee_3d, ankle_3d)
                     self.angle_buffer.append(raw_angle)
                     current_angle = sum(self.angle_buffer) / len(self.angle_buffer)
-                    torso_lean = calculate_vertical_angle(shoulder_raw, hip_raw)
-                    shoulder_width = calculate_distance(l_shoulder_raw, r_shoulder_raw)
-                    feet_width = calculate_distance(l_ankle_raw, r_ankle_raw)
+                    
+                    # ✅ Use 2D for Stance/Posture (Visual feedback)
+                    # Note: We intentionally use 2D Angle here for Lean check consistency with screen
+                    angle_2d = calculate_angle(hip_2d, knee_2d, get_2d(landmarks[ankle_idx]))
+                    
+                    torso_lean = calculate_vertical_angle(shoulder_2d, hip_2d)
+                    shoulder_width = calculate_distance(l_shoulder_2d, r_shoulder_2d)
+                    feet_width = calculate_distance(l_ankle_2d, r_ankle_2d)
                     stance_ratio = 0 if shoulder_width == 0 else feet_width / shoulder_width
 
-                    knee_px = tuple(np.multiply(knee_raw, [target_w, new_h]).astype(int))
+                    # --- Drawing Angle Text ---
+                    knee_px = tuple(np.multiply(knee_2d, [target_w, new_h]).astype(int))
                     cv2.putText(image, str(int(current_angle)), knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
+                    # --- Feedback Logic ---
                     potential_bad_posture = False; temp_feedback = ""
+                    
+                    # Check Stance (Visual Width)
                     if stance_ratio < MIN_FEET_RATIO and current_angle > 150: potential_bad_posture = True; temp_feedback = "NARROW STANCE!"
                     elif stance_ratio > MAX_FEET_RATIO and current_angle > 150: potential_bad_posture = True; temp_feedback = "WIDE STANCE!"
-                    elif torso_lean > LEAN_THRESHOLD and (100 < current_angle < 160): potential_bad_posture = True; temp_feedback = "DONT LEAN!"
+                    
+                    # Check Lean (Using 2D angle for context, 100-160 is mid-rep)
+                    elif torso_lean > LEAN_THRESHOLD and (100 < angle_2d < 160): potential_bad_posture = True; temp_feedback = "DONT LEAN!"
                     
                     if potential_bad_posture: self.bad_posture_counter += 1
                     else: self.bad_posture_counter = 0 
@@ -150,14 +195,17 @@ class SitToStandLogic:
                         feedback = "STAND UP FULLY!"; feedback_color = (0, 165, 255); self.current_rep_error = True
                     else: feedback = "GOOD FORM"; feedback_color = (0, 255, 0)
 
-                    if current_angle > 160: 
+                    # --- Counting Logic (Based on 3D Angle) ---
+                    if current_angle > 165: # Slightly higher threshold for 3D accuracy
                         self.stage = "up"
                         if feedback == "GOOD FORM": self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
-                    if current_angle < 85 and self.stage == 'up':
+                    
+                    if current_angle < 95 and self.stage == 'up': # Higher sit threshold for 3D
                         self.stage = "down"; self.counter += 1
                         if not self.current_rep_error: self.rep_quality_history.append(1) 
                         else: self.rep_quality_history.append(0) 
                         self.current_rep_error = False 
+
             except Exception: pass
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
@@ -182,7 +230,7 @@ class SitToStandLogic:
 # 🌐 Streamlit Interface
 # ==========================================
 st.set_page_config(page_title="STS Analyzer", layout="wide")
-st.title("🩺 AI-Based Sit to Stand Biomechanics Analyzer")
+st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
 if "user_session_id" not in st.session_state:
@@ -233,8 +281,9 @@ if mode == "Webcam (Live)":
                 "time_history": self.time_history
             }
 
+    st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v32", 
+        key="sts-webcam-safe-v33", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -280,15 +329,12 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # -----------------------------------------------------------
-        # 🚫 LIMIT CHECK: 200 MB (200 * 1024 * 1024 bytes)
-        # -----------------------------------------------------------
+        # Limit Check
         MAX_FILE_SIZE = 200 * 1024 * 1024
-        
         if uploaded_file.size > MAX_FILE_SIZE:
             st.error(f"❌ File too large! Please upload a video smaller than 200MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
-            # ✅ Valid File -> Proceed with Hashing & Processing
+            # Hashing logic
             uploaded_file.seek(0)
             file_bytes = uploaded_file.read(2 * 1024 * 1024) 
             file_hash = hashlib.md5(file_bytes).hexdigest()
