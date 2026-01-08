@@ -3,7 +3,7 @@ import sys
 import time
 import gc
 import uuid
-import hashlib # ✅ เพิ่มไลบรารีสำหรับสร้างลายนิ้วมือไฟล์
+import hashlib
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -218,7 +218,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v30", 
+        key="sts-webcam-safe-v32", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -264,13 +264,12 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # ✅ Generate HASH from file content (Unique for every file content)
+        # Hashing logic
         uploaded_file.seek(0)
-        file_bytes = uploaded_file.read(2 * 1024 * 1024) # Read first 2MB for hashing (fast & accurate)
+        file_bytes = uploaded_file.read(2 * 1024 * 1024) 
         file_hash = hashlib.md5(file_bytes).hexdigest()
-        uploaded_file.seek(0) # ⚠️ Reset cursor back to start!
+        uploaded_file.seek(0) 
 
-        # Combine Session ID + File Hash
         session_id = st.session_state["user_session_id"]
         file_id = f"{session_id}_{file_hash}"
         
@@ -284,7 +283,13 @@ elif mode == "Video File":
         if os.path.exists(output_path) and stats_key in st.session_state:
             stats = st.session_state[stats_key]
             
-            st.success("✅ Analysis Complete! (Loaded from Cache)")
+            # ✅ CHECK FLAG: Just processed or loaded?
+            if st.session_state.get("just_processed") == file_id:
+                st.success("✅ Analysis Complete!")
+                del st.session_state["just_processed"] # Reset flag
+            else:
+                st.success("✅ Analysis Complete! (Loaded from Cache)")
+
             st.subheader("🎬 Analyzed Video")
             st.video(output_path)
             with open(output_path, "rb") as file:
@@ -326,14 +331,19 @@ elif mode == "Video File":
         # CASE 3: Process New File
         # -----------------------------------------------------------
         else:
-            raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-            raw_tfile.write(uploaded_file.read())
-            raw_tfile.close()
+            status_container = st.empty()
             
-            sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-            st.info("🔄 Optimizing video format...")
-            os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
+            with status_container.container():
+                with st.spinner("🔄 Optimizing video format... (Preparing for analysis)"):
+                    raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
+                    raw_tfile.write(uploaded_file.read())
+                    raw_tfile.close()
+                    
+                    sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                    os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
             
+            status_container.empty()
+
             cap = cv2.VideoCapture(sanitized_input)
             
             if not cap.isOpened():
@@ -354,11 +364,10 @@ elif mode == "Video File":
                 
                 out = None
                 frame_count = 0
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                status_text.info("⏳ Analyzing video frames...")
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+                progress_bar = status_container.progress(0, text="Analyzing video frames... 0%")
+                
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret: break
@@ -373,23 +382,28 @@ elif mode == "Video File":
                     angle_data.append(angle)
                     time_data.append(timestamp)
                     frame_count += 1
+                    
                     if total_frames > 0:
                         progress = min(frame_count / total_frames, 1.0)
-                        progress_bar.progress(progress)
+                        percent_text = f"Analyzing video frames... {int(progress * 100)}%"
+                        progress_bar.progress(progress, text=percent_text)
 
                 cap.release()
                 if out: out.release()
-                progress_bar.empty()
-                status_text.empty()
+                status_container.empty()
                 
                 if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
-                    os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
+                    with st.spinner("💾 Finalizing video file..."):
+                         os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
                     
                     st.session_state[stats_key] = {
                         "reps": logic.rep_quality_history,
                         "angles": angle_data,
                         "times": time_data
                     }
+                    
+                    # ✅ SET FLAG: I just processed this file!
+                    st.session_state["just_processed"] = file_id
                     
                     st.rerun() 
                 
