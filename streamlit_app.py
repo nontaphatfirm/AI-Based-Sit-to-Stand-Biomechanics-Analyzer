@@ -216,20 +216,22 @@ if mode == "Webcam (Live)":
                 "time_history": self.time_history
             }
 
-    with st.expander("💡 View Instructions & Connection Tips (Click to open)", expanded=True):
+    with st.expander("💡 View Instructions & Connection Tips (Click to open)", expanded=False):
         st.markdown(
             """
             ### 📝 How to use
-            1. **Start Analysis:** Click the `START` button below.
-            2. **Perform Action:** Do the Sit-to-Stand exercise in front of the camera.
-            3. **Get Results:** Click `STOP` when you are done to see the **Replay Video** and **Graphs**.
+            1. **Allow Access:** Please click **"Allow"** when the browser asks for camera permission.
+            2. **Select Camera:** Click **"SELECT DEVICE"** to choose your preferred camera (Front/Back).
+            3. **Start Analysis:** Click the `START` button below.
+            4. **Perform Action:** Do the Sit-to-Stand exercise in front of the camera.
+            5. **Get Results:** Click `STOP` when finished to see the **Replay Video** and **Graphs**.
 
             ### ⚠️ Troubleshooting
             * **Network Error?** If the video doesn't start, your WiFi firewall might be blocking it.
             * **Solution:** Please try switching to a **Mobile Hotspot (4G/5G)**.
             """
         )
-        
+
     ctx = webrtc_streamer(
         key="sts-webcam-safe-v32", 
         mode=WebRtcMode.SENDRECV,
