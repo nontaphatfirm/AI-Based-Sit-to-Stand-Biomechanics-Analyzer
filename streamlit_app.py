@@ -182,7 +182,7 @@ class SitToStandLogic:
 # 🌐 Streamlit Interface
 # ==========================================
 st.set_page_config(page_title="STS Analyzer", layout="wide")
-st.title("🩺 AI-Based-Sit-to-Stand-Biomechanics-Analyzer")
+st.title("🩺 AI-Based Sit to Stand Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
 if "user_session_id" not in st.session_state:
