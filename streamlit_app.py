@@ -294,7 +294,7 @@ if mode == "Webcam (Live)":
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={
-            "video": {"width": 640, "height": 480, "frameRate": 30},
+            "video": {"width": 1280, "height": 960, "frameRate": 30},
             "audio": False
         },
         async_processing=True,
