@@ -66,7 +66,6 @@ class SitToStandLogic:
     def process_frame(self, image):
         if self.start_time is None: self.start_time = time.time()
         
-        # 🔧 HD Resize
         target_w = 1280 
         h, w, c = image.shape
         if w > target_w:
@@ -185,8 +184,6 @@ st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
 if "webcam_results" not in st.session_state: st.session_state["webcam_results"] = None
-if "processed_video_path" not in st.session_state: st.session_state["processed_video_path"] = None
-if "processed_stats" not in st.session_state: st.session_state["processed_stats"] = None
 
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
@@ -216,7 +213,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v26", 
+        key="sts-webcam-safe-v27", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -262,31 +259,69 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # 🔑 Create a persistent path in /tmp based on file name size
+        # Generate persistent file paths based on unique file ID
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         output_filename = f"processed_{file_id}.mp4"
         output_path = os.path.join(tempfile.gettempdir(), output_filename)
         
-        # Check if we already processed this exact file
-        if os.path.exists(output_path):
-            st.success("✅ Analysis Loaded from Cache!")
+        # ✅ KEY FIX: Stats Key for Session State
+        stats_key = f"stats_{file_id}"
+
+        # -----------------------------------------------------------
+        # CASE 1: Video exists AND stats exist (User clicked download)
+        # -----------------------------------------------------------
+        if os.path.exists(output_path) and stats_key in st.session_state:
+            stats = st.session_state[stats_key] # Retrieve cached stats
+            
+            st.success("✅ Analysis Complete! (Loaded from Cache)")
             st.subheader("🎬 Analyzed Video")
             st.video(output_path)
             with open(output_path, "rb") as file:
                 st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
-            
-            # Note: We can't easily recover stats from video file alone without re-processing or saving stats separately.
-            # For simplicity, we just show the video if cached. If user wants stats, they can rename file slightly to force re-process.
-            st.info("ℹ️ This video was loaded from cache. Rename the file to re-process for new stats.")
 
+            # Show Graphs (Logic reused)
+            st.divider()
+            st.subheader("📊 Summary Report")
+            total_reps = len(stats["reps"])
+            correct_reps = sum(stats["reps"])
+            accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Reps", total_reps)
+            col2.metric("Good Form", correct_reps)
+            col3.metric("Accuracy", f"{accuracy:.1f}%")
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+            ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
+            ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
+            ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
+            ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
+            labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
+            bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
+            ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
+            for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
+            st.pyplot(fig)
+            plt.close(fig)
+
+        # -----------------------------------------------------------
+        # CASE 2: Video exists but NO stats (App rebooted)
+        # -----------------------------------------------------------
+        elif os.path.exists(output_path) and stats_key not in st.session_state:
+             st.success("✅ Analysis Loaded from Cache!")
+             st.video(output_path)
+             with open(output_path, "rb") as file:
+                st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
+             st.info("ℹ️ Rename the file to re-process for new stats (Server was rebooted).")
+
+        # -----------------------------------------------------------
+        # CASE 3: Process New File
+        # -----------------------------------------------------------
         else:
-            # Process New File
             raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
             raw_tfile.write(uploaded_file.read())
             raw_tfile.close()
             
             sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-            st.info("🔄 Converting video format...")
+            st.info("🔄 Optimizing video format...")
             os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
             
             cap = cv2.VideoCapture(sanitized_input)
@@ -297,8 +332,6 @@ elif mode == "Video File":
                 logic = SitToStandLogic()
                 angle_data = []; time_data = []
                 fps = cap.get(cv2.CAP_PROP_FPS)
-                
-                # Write to a temp intermediate file first
                 temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
                 
                 target_w = 1280 
@@ -329,7 +362,6 @@ elif mode == "Video File":
                     out.write(processed_img)
                     angle_data.append(angle)
                     time_data.append(timestamp)
-                    
                     frame_count += 1
                     if total_frames > 0:
                         progress = min(frame_count / total_frames, 1.0)
@@ -340,41 +372,20 @@ elif mode == "Video File":
                 progress_bar.empty()
                 status_text.empty()
                 
-                # Convert to Final H.264 Path
+                # Convert & Save Final
                 if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                     os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
                     
-                    st.success("✅ Analysis Complete!")
-                    st.subheader("🎬 Analyzed Video")
-                    st.video(output_path)
+                    # ✅ SAVE STATS TO SESSION STATE
+                    st.session_state[stats_key] = {
+                        "reps": logic.rep_quality_history,
+                        "angles": angle_data,
+                        "times": time_data
+                    }
                     
-                    with open(output_path, "rb") as file:
-                        st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
-
-                    st.divider()
-                    st.subheader("📊 Summary Report")
-                    total_reps = len(logic.rep_quality_history)
-                    correct_reps = sum(logic.rep_quality_history)
-                    accuracy = (correct_reps/total_reps*100) if total_reps > 0 else 0
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Total Reps", total_reps)
-                    col2.metric("Good Form", correct_reps)
-                    col3.metric("Accuracy", f"{accuracy:.1f}%")
-                    
-                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-                    ax1.plot(time_data, angle_data, label='Knee Angle', color='blue')
-                    ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
-                    ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
-                    ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
-                    
-                    labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
-                    bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
-                    ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
-                    for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
-                    st.pyplot(fig)
-                    plt.close(fig)
+                    st.experimental_rerun() # Force reload to enter CASE 1 immediately
                 
-                # Cleanup Intermediate
+                # Cleanup
                 if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                 if os.path.exists(sanitized_input): os.remove(sanitized_input)
                 if os.path.exists(temp_output): os.remove(temp_output)
