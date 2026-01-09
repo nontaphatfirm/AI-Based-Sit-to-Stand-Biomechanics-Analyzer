@@ -288,6 +288,14 @@ with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=Fa
             * *Why?* This allows the AI to accurately measure **BOTH** your **Knee Angle** (for counting) and **Stance Width** (for posture check).
         2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe** at all times.
         3.  **💡 Lighting:** Use a well-lit room and avoid wearing clothes that blend into the background.
+        
+        ---
+        ### 📝 How to Use
+        * **Webcam:** 1. Click **"Allow"** for camera permission.
+            2. Click **"SELECT DEVICE"** to choose your camera (Front/Back).
+            3. Click **"START"** to begin.
+        * **Video File:** Upload a video (`.mp4`, max 200MB) recorded with the positioning above.
+        * **Troubleshooting:** If the webcam freezes or fails to load, please switch to a **Mobile Hotspot**.
         """
     )
 
