@@ -17,7 +17,7 @@ os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 os.environ["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
 
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode, WebRtcStreamerContext
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -28,20 +28,25 @@ import tempfile
 import matplotlib.pyplot as plt
 
 # ==========================================
-# 🧹 GLOBAL CLEANUP ON STARTUP
+# 🧹 GLOBAL DEEP CLEANUP (Run 3x for safety)
 # ==========================================
 def nuclear_cleanup():
     """Force release memory back to OS immediately."""
-    gc.collect()
+    # Run GC multiple times to clear cyclical references
+    for _ in range(3):
+        gc.collect()
+    
+    # Force libc to release memory to OS (Linux only)
     try:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except Exception:
         pass
 
+# 🔥 Clean immediately upon script load/refresh
 nuclear_cleanup()
 
 # ==========================================
-# 🛡️ GLOBAL RAM MONITOR (Background Thread)
+# 🛡️ GLOBAL RAM MONITOR
 # ==========================================
 def get_current_memory_mb():
     try:
@@ -57,7 +62,7 @@ def start_ram_monitor():
     def monitor_loop():
         while True:
             mem = get_current_memory_mb()
-            # Print Log ทุก 3 วินาที (หลังบ้าน)
+            # Log every 3 seconds to console
             print(f"📈 [System Monitor] RAM Usage: {mem:.1f} MB", flush=True)
             time.sleep(3)
     t = threading.Thread(target=monitor_loop, name="RamMonitor", daemon=True)
@@ -83,7 +88,7 @@ INCOMPLETE_STAND_DELAY = 15
 # ==========================================
 # 🛡️ Memory Guard Functions
 # ==========================================
-def check_memory_safe(limit_mb=1500): # 👈 LIMIT 1.5 GB
+def check_memory_safe(limit_mb=1500): # 1.5 GB Limit
     current_mem_mb = get_current_memory_mb()
     if current_mem_mb > limit_mb:
         return False, current_mem_mb
@@ -114,7 +119,7 @@ def calculate_vertical_angle(a, b):
     return np.degrees(np.arctan2(abs(a[0] - b[0]), abs(a[1] - b[1])))
 
 # ==========================================
-# 🧠 Logic Class
+# 🧠 Logic Class (With Destructor Fix)
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
@@ -124,6 +129,15 @@ class SitToStandLogic:
         self.rep_quality_history = [] 
         self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
         self.current_side = "AUTO"
+
+    # ✅ IMPORTANT: Explicitly close MediaPipe to free C++ memory
+    def close(self):
+        if self.pose:
+            self.pose.close()
+            self.pose = None
+
+    def __del__(self):
+        self.close()
 
     def process_frame(self, image):
         if self.start_time is None: self.start_time = time.time()
@@ -255,7 +269,7 @@ st.set_page_config(page_title="STS Analyzer", layout="wide")
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
-# 🗝️ DYNAMIC KEY GENERATION (To fix thread hanging issues)
+# 🗝️ DYNAMIC KEY (Prevents Thread Locking)
 if "webrtc_key" not in st.session_state:
     st.session_state["webrtc_key"] = f"sts-v1-{uuid.uuid4()}"
 
@@ -264,36 +278,36 @@ if "user_session_id" not in st.session_state:
 
 if "webcam_results" not in st.session_state: st.session_state["webcam_results"] = None
 
-# 🚨 GLOBAL SAFETY CHECK BEFORE RENDERING
+# 🚨 GLOBAL SAFETY CHECK (Reset on Load if Memory High)
 safe, mem_usage = check_memory_safe(1500)
 if not safe:
-    st.error(f"⚠️ **Memory Critical ({mem_usage:.1f} MB)**: System has auto-reset to prevent crash.")
-    st.warning("🔄 Please refresh the browser manually if the app doesn't reload.")
-    # Nuke everything
+    st.error(f"⚠️ **System Reset triggered due to High Memory ({mem_usage:.1f} MB)**")
+    st.warning("🔄 Cleaning up resources... Please wait or refresh manually.")
     st.cache_resource.clear()
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     nuclear_cleanup()
-    st.stop() # Force stop everything
+    st.stop()
 
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
 with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=False):
+
     st.markdown(
         """
         ### 📸 Optimal Camera Positioning
         Our AI uses **3D Motion Analysis**, allowing it to track you from various angles. However, for the best results:
-        
+
         1.  **📐 The "Sweet Spot" (45°):** Stand diagonally (approx. 45°) to the camera.
             * *Why?* This allows the AI to accurately measure **BOTH** your **Knee Angle** (for counting) and **Stance Width** (for posture check).
         2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe** at all times.
         3.  **💡 Lighting:** Use a well-lit room and avoid wearing clothes that blend into the background.
-        
+
         ---
+
         ### 📝 How to Use
-        * **Webcam:** 1. Click **"Allow"** for camera permission.
-            2. Click **"SELECT DEVICE"** to choose your camera (Front/Back).
-            3. Click **"START"** to begin.
+
+        * **Webcam:** 1. Click **"Allow"** for camera permission. 2. Click **"SELECT DEVICE"** to choose your camera (Front/Back). 3. Click **"START"** to begin.
         * **Video File:** Upload a video (`.mp4`, max 200MB) recorded with the positioning above.
         * **Troubleshooting:** If the webcam freezes or fails to load, please switch to a **Mobile Hotspot**.
         """
@@ -307,14 +321,19 @@ if mode == "Webcam (Live)":
             self.time_history = []
             self.frame_count = 0
         
+        def close(self):
+            # 🔥 Explicitly close logic when processor dies
+            if self.logic:
+                self.logic.close()
+
         def recv(self, frame):
             try:
-                # 🛡️ WEBCAM MEMORY GUARD (Check every 10 frames)
+                # 🛡️ WEBCAM SAFETY CUT (Check every 10 frames)
                 self.frame_count += 1
                 if self.frame_count % 10 == 0:
                     safe, _ = check_memory_safe(1500)
                     if not safe:
-                        # 💥 Raise error to stop the stream immediately
+                        print("🔥 RAM Limit Hit in Webcam! Stopping...")
                         raise Exception("Memory Limit Exceeded")
 
                 img = frame.to_ndarray(format="bgr24")
@@ -324,9 +343,7 @@ if mode == "Webcam (Live)":
                 self.time_history.append(timestamp)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
             except Exception as e:
-                # If memory full, this will stop the stream
-                print(f"Stream Stopped: {e}")
-                raise e # Propagate error to shutdown stream
+                raise e # Propagate to stop stream
         
         def get_stats(self):
             return {
@@ -337,7 +354,6 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     
-    # 🔑 Using Dynamic Key to force new thread on reset
     ctx = webrtc_streamer(
         key=st.session_state["webrtc_key"], 
         mode=WebRtcMode.SENDRECV,
@@ -381,7 +397,7 @@ if mode == "Webcam (Live)":
             
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
-                st.session_state["webrtc_key"] = f"sts-v1-{uuid.uuid4()}" # 🔄 NEW KEY GENERATED
+                st.session_state["webrtc_key"] = f"sts-v1-{uuid.uuid4()}" # New Key
                 del ctx 
                 nuclear_cleanup() 
                 st.rerun()
@@ -390,7 +406,7 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        MAX_FILE_SIZE = 100 * 1024 * 1024 # 📉 100MB Limit
+        MAX_FILE_SIZE = 100 * 1024 * 1024 # 100MB Limit
         if uploaded_file.size > MAX_FILE_SIZE:
             st.error(f"❌ File too large! Please upload a video smaller than 100MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
@@ -496,7 +512,7 @@ elif mode == "Video File":
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
-                        # Log RAM
+                        # Log RAM (Console)
                         current_time = time.time()
                         if current_time - last_log_time >= 3:
                             current_mem = get_current_memory_mb()
@@ -524,6 +540,7 @@ elif mode == "Video File":
 
                     cap.release()
                     if out: out.release()
+                    logic.close() # 🔥 IMPORTANT: Close MediaPipe
                     status_container.empty()
                     log_container.empty()
                     
@@ -532,6 +549,7 @@ elif mode == "Video File":
                         st.error("🔄 **Please Refresh the Page to Continue.**")
                         
                         del cap, out, logic, angle_data, time_data
+                        
                         try:
                             if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                             if os.path.exists(temp_output): os.remove(temp_output)
