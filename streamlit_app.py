@@ -17,7 +17,7 @@ os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 os.environ["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
 
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode, WebRtcStreamerContext
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -292,24 +292,15 @@ if not safe:
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
 with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=False):
-
     st.markdown(
         """
         ### 📸 Optimal Camera Positioning
         Our AI uses **3D Motion Analysis**, allowing it to track you from various angles. However, for the best results:
-
+        
         1.  **📐 The "Sweet Spot" (45°):** Stand diagonally (approx. 45°) to the camera.
             * *Why?* This allows the AI to accurately measure **BOTH** your **Knee Angle** (for counting) and **Stance Width** (for posture check).
         2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe** at all times.
         3.  **💡 Lighting:** Use a well-lit room and avoid wearing clothes that blend into the background.
-
-        ---
-
-        ### 📝 How to Use
-
-        * **Webcam:** 1. Click **"Allow"** for camera permission. 2. Click **"SELECT DEVICE"** to choose your camera (Front/Back). 3. Click **"START"** to begin.
-        * **Video File:** Upload a video (`.mp4`, max 200MB) recorded with the positioning above.
-        * **Troubleshooting:** If the webcam freezes or fails to load, please switch to a **Mobile Hotspot**.
         """
     )
 
@@ -392,7 +383,8 @@ if mode == "Webcam (Live)":
             buf = io.BytesIO()
             fig.savefig(buf, format="png")
             buf.seek(0)
-            st.image(buf, caption="Session Analysis", use_container_width=True)
+            # ✅ Updated to use width="stretch" to avoid deprecation warning
+            st.image(buf, caption="Session Analysis", width="stretch")
             plt.close(fig)
             
             if st.button("Start New Session"):
@@ -460,7 +452,8 @@ elif mode == "Video File":
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png")
                 buf.seek(0)
-                st.image(buf, caption="Session Analysis", use_container_width=True)
+                # ✅ Updated to use width="stretch" to avoid deprecation warning
+                st.image(buf, caption="Session Analysis", width="stretch")
                 plt.close(fig)
 
             elif os.path.exists(output_path) and stats_key not in st.session_state:
@@ -512,7 +505,7 @@ elif mode == "Video File":
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
-                        # Log RAM (Console)
+                        # Log RAM
                         current_time = time.time()
                         if current_time - last_log_time >= 3:
                             current_mem = get_current_memory_mb()
@@ -540,7 +533,7 @@ elif mode == "Video File":
 
                     cap.release()
                     if out: out.release()
-                    logic.close() # 🔥 IMPORTANT: Close MediaPipe
+                    logic.close() # 🔥 Close logic here as well
                     status_container.empty()
                     log_container.empty()
                     
