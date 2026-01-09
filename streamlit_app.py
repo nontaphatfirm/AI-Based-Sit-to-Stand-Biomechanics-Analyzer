@@ -200,7 +200,7 @@ class SitToStandLogic:
                         self.stage = "up"
                         if feedback == "GOOD FORM": self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
                     
-                    if current_angle < 95 and self.stage == 'up': # Higher sit threshold for 3D
+                    if current_angle < 100 and self.stage == 'up': # Higher sit threshold for 3D
                         self.stage = "down"; self.counter += 1
                         if not self.current_rep_error: self.rep_quality_history.append(1) 
                         else: self.rep_quality_history.append(0) 
@@ -315,8 +315,8 @@ if mode == "Webcam (Live)":
             
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
             ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
-            ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
-            ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
+            ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
+            ax1.axhline(y=100, color='r', linestyle='--', label='Sit (100°)')
             ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
             
             labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
@@ -382,8 +382,8 @@ elif mode == "Video File":
                 
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
                 ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
-                ax1.axhline(y=160, color='g', linestyle='--', label='Stand (160°)')
-                ax1.axhline(y=85, color='r', linestyle='--', label='Sit (85°)')
+                ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
+                ax1.axhline(y=100, color='r', linestyle='--', label='Sit (100°)')
                 ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
                 labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
                 bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
