@@ -4,6 +4,7 @@ import time
 import gc
 import uuid
 import hashlib
+import psutil  # ✅ เพิ่ม Library สำหรับดู RAM
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -38,6 +39,26 @@ BAD_POSTURE_DELAY = 3
 INCOMPLETE_STAND_DELAY = 15
 
 # ==========================================
+# 🛡️ Memory Guard Function
+# ==========================================
+def check_memory_safe(limit_mb=850):
+    """
+    Check current memory usage.
+    Returns False if memory usage exceeds the limit (DANGER).
+    """
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    current_mem_mb = mem_info.rss / 1024 / 1024  # Convert Bytes to MB
+    
+    # Print log to console (Server logs)
+    # print(f"🧠 RAM Usage: {current_mem_mb:.2f} MB") 
+    
+    if current_mem_mb > limit_mb:
+        print(f"⚠️ DANGER: Memory exceeded {limit_mb}MB! Initiating Emergency Stop.")
+        return False # Not Safe
+    return True # Safe
+
+# ==========================================
 # 📐 Helper Functions
 # ==========================================
 def calculate_angle(a, b, c):
@@ -66,7 +87,6 @@ def calculate_vertical_angle(a, b):
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
-        # model_complexity=1 is balanced for CPU
         self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=1)
         self.counter = 0; self.stage = None; self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
@@ -257,7 +277,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v36", 
+        key="sts-webcam-safe-v37", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -367,14 +387,13 @@ elif mode == "Video File":
 
             else:
                 status_container = st.empty()
-                # ✅ 1. Save uploaded file to Temp
-                # We skip "Optimizing/Converting" and pass this direct to OpenCV
+                
+                # ✅ NO OPTIMIZATION (Use direct file)
                 with status_container.container():
-                    raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-                    raw_tfile.write(uploaded_file.read())
-                    raw_tfile.close()
+                     raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
+                     raw_tfile.write(uploaded_file.read())
+                     raw_tfile.close()
 
-                # ✅ 2. Open Video directly (No pre-processing)
                 cap = cv2.VideoCapture(raw_tfile.name)
                 
                 if not cap.isOpened():
@@ -396,7 +415,15 @@ elif mode == "Video File":
                     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                     progress_bar = status_container.progress(0, text="Analyzing video frames... 0%")
                     
+                    stop_flag = False
+
                     while cap.isOpened():
+                        # ✅ MEMORY GUARD: Check every 30 frames
+                        if frame_count % 30 == 0:
+                            if not check_memory_safe(limit_mb=850):
+                                stop_flag = True
+                                break
+
                         ret, frame = cap.read()
                         if not ret: break
                         processed_img, angle, timestamp = logic.process_frame(frame)
@@ -420,7 +447,15 @@ elif mode == "Video File":
                     if out: out.release()
                     status_container.empty()
                     
-                    if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
+                    if stop_flag:
+                        st.error("⚠️ **System Warning:** Analysis stopped early because the server ran out of memory.")
+                        st.warning("ℹ️ **Suggestion:** Please try uploading a shorter video or a file with lower resolution.")
+                        # Clean up
+                        if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
+                        if os.path.exists(temp_output): os.remove(temp_output)
+                        gc.collect()
+
+                    elif os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
                              os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
                         st.session_state[stats_key] = {
