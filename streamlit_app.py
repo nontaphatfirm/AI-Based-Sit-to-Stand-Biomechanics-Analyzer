@@ -6,7 +6,7 @@ import uuid
 import hashlib
 import psutil
 import ctypes
-import threading # ✅ เพิ่ม Threading เพื่อให้ทำงานคู่ขนานได้
+import threading
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -27,6 +27,21 @@ import tempfile
 import matplotlib.pyplot as plt
 
 # ==========================================
+# 🧹 GLOBAL CLEANUP ON STARTUP (Fix Refresh Issue)
+# ==========================================
+# ฟังก์ชันนี้จะทำงานทุกครั้งที่ User กด Refresh หน้าเว็บ หรือ Script รันใหม่
+def nuclear_cleanup():
+    """Force release memory back to OS immediately."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+# เรียกใช้ทันทีที่บรรทัดแรก เพื่อเคลียร์ขยะจาก Session ก่อนหน้า
+nuclear_cleanup()
+
+# ==========================================
 # 🛡️ GLOBAL RAM MONITOR (Background Thread)
 # ==========================================
 def get_current_memory_mb():
@@ -37,25 +52,19 @@ def get_current_memory_mb():
         return 0
 
 def start_ram_monitor():
-    """Starts a background thread that prints RAM usage every 3 seconds."""
-    # เช็คว่ามี Thread นี้รันอยู่แล้วหรือยัง (ป้องกันการรันซ้อน)
     for t in threading.enumerate():
         if t.name == "RamMonitor":
             return
-
     def monitor_loop():
         while True:
             mem = get_current_memory_mb()
-            # Print Log ออกมาตลอดเวลา (Flush=True เพื่อให้เห็นทันที)
+            # Print Log ทุก 3 วินาที
             print(f"📈 [System Monitor] RAM Usage: {mem:.1f} MB", flush=True)
             time.sleep(3)
-
-    # สร้าง Daemon Thread (จะตายเองเมื่อปิดแอพ)
     t = threading.Thread(target=monitor_loop, name="RamMonitor", daemon=True)
     t.start()
     print("✅ RAM Monitor Thread Started!", flush=True)
 
-# 🚀 สั่งรัน Monitor ทันทีที่โหลดไฟล์
 start_ram_monitor()
 
 # ==========================================
@@ -80,14 +89,6 @@ def check_memory_safe(limit_mb=3000):
     if current_mem_mb > limit_mb:
         return False, current_mem_mb
     return True, current_mem_mb
-
-def force_memory_cleanup():
-    """☢️ Force release memory back to OS"""
-    gc.collect()
-    try:
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except Exception:
-        pass
 
 # ==========================================
 # 📐 Helper Functions
@@ -118,7 +119,6 @@ def calculate_vertical_angle(a, b):
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
-        # ✅ Standard Model
         self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=1)
         self.counter = 0; self.stage = None; self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
@@ -129,7 +129,6 @@ class SitToStandLogic:
     def process_frame(self, image):
         if self.start_time is None: self.start_time = time.time()
         
-        # ✅ High Resolution (1280p)
         target_w = 1280 
         h, w, c = image.shape
         if w > target_w:
@@ -253,6 +252,17 @@ class SitToStandLogic:
 # 🌐 Streamlit Interface
 # ==========================================
 st.set_page_config(page_title="STS Analyzer", layout="wide")
+
+# 🔴 SIDEBAR: Emergency Memory Cleanup
+with st.sidebar:
+    st.header("🔧 Tools")
+    st.write(f"RAM: {get_current_memory_mb():.1f} MB")
+    if st.button("🗑️ Clear RAM (Hard Reset)"):
+        st.cache_resource.clear()
+        st.session_state.clear()
+        nuclear_cleanup()
+        st.rerun()
+
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
 
@@ -310,7 +320,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v45", 
+        key="sts-webcam-safe-v46", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -349,9 +359,11 @@ if mode == "Webcam (Live)":
             st.pyplot(fig)
             plt.close(fig)
             
+            # ✅ IMPROVED RESET LOGIC
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
-                gc.collect()
+                del ctx # Force release webrtc context
+                nuclear_cleanup() # Nuclear Clean!
                 st.rerun()
 
 elif mode == "Video File":
@@ -362,8 +374,8 @@ elif mode == "Video File":
         if uploaded_file.size > MAX_FILE_SIZE:
             st.error(f"❌ File too large! Please upload a video smaller than 200MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
-            # 🧹 PRE-CLEANUP
-            force_memory_cleanup()
+            # 🧹 PRE-CLEANUP BEFORE PROCESSING
+            nuclear_cleanup()
             
             uploaded_file.seek(0)
             file_bytes = uploaded_file.read(2 * 1024 * 1024) 
@@ -423,7 +435,8 @@ elif mode == "Video File":
 
             else:
                 status_container = st.empty()
-                
+                log_container = st.empty()
+
                 with status_container.container():
                      raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
                      raw_tfile.write(uploaded_file.read())
@@ -452,6 +465,7 @@ elif mode == "Video File":
                     
                     stop_flag = False
                     stop_reason = ""
+                    last_log_time = time.time()
 
                     while cap.isOpened():
                         # 🛡️ MEMORY GUARD CHECK
@@ -462,11 +476,16 @@ elif mode == "Video File":
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
+                        # 🕒 LOG RAM EVERY 3 SECONDS
+                        current_time = time.time()
+                        if current_time - last_log_time >= 3:
+                            current_mem = get_current_memory_mb()
+                            # print(f"📈 [3s Log] Current RAM: {current_mem:.1f} MB", flush=True) # Already in global thread
+                            last_log_time = current_time
+                        
                         ret, frame = cap.read()
                         if not ret: break
 
-                        # ❌ NO FRAME SKIPPING (As requested)
-                        
                         processed_img, angle, timestamp = logic.process_frame(frame)
                         if out is None:
                             h, w = processed_img.shape[:2]
@@ -478,7 +497,7 @@ elif mode == "Video File":
                         frame_count += 1
                         
                         # Aggressive GC
-                        if frame_count % 50 == 0: force_memory_cleanup()
+                        if frame_count % 50 == 0: nuclear_cleanup()
 
                         if total_frames > 0:
                             progress = min(frame_count / total_frames, 1.0)
@@ -488,6 +507,7 @@ elif mode == "Video File":
                     cap.release()
                     if out: out.release()
                     status_container.empty()
+                    log_container.empty()
                     
                     if stop_flag:
                         st.error(f"⚠️ **System Warning:** Stopped due to memory limit! (Current: {stop_reason})")
@@ -499,7 +519,7 @@ elif mode == "Video File":
                             if os.path.exists(temp_output): os.remove(temp_output)
                         except Exception: pass
                         
-                        force_memory_cleanup()
+                        nuclear_cleanup()
                         
                     elif os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
@@ -515,4 +535,4 @@ elif mode == "Video File":
                     # Normal Cleanup
                     if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                     if os.path.exists(temp_output): os.remove(temp_output)
-                    force_memory_cleanup()
+                    nuclear_cleanup()
