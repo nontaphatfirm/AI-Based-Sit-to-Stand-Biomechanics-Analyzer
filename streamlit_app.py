@@ -40,7 +40,6 @@ INCOMPLETE_STAND_DELAY = 15
 # ==========================================
 # 📐 Helper Functions
 # ==========================================
-# ✅ 2D Angle (For visual checks like leaning)
 def calculate_angle(a, b, c):
     a = np.array(a); b = np.array(b); c = np.array(c)
     radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
@@ -48,22 +47,11 @@ def calculate_angle(a, b, c):
     if angle > 180.0: angle = 360-angle
     return angle
 
-# ✅ 3D Angle (For accurate Knee bending regardless of camera angle)
 def calculate_angle_3d(a, b, c):
-    a = np.array(a) # [x, y, z]
-    b = np.array(b)
-    c = np.array(c)
-
-    # Create vectors
-    ba = a - b
-    bc = c - b
-
-    # Calculate cosine of angle using dot product
+    a = np.array(a); b = np.array(b); c = np.array(c)
+    ba = a - b; bc = c - b
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
-    
-    # Clip to handle floating point errors
     cosine_angle = np.clip(cosine_angle, -1.0, 1.0)
-    
     angle = np.arccos(cosine_angle)
     return np.degrees(angle)
 
@@ -78,7 +66,8 @@ def calculate_vertical_angle(a, b):
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
-        self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7)
+        # model_complexity=1 is balanced for CPU
+        self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=1)
         self.counter = 0; self.stage = None; self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
         self.rep_quality_history = [] 
@@ -104,16 +93,13 @@ class SitToStandLogic:
         current_angle = 0; feedback = "READY"; feedback_color = (0, 255, 0)
         current_time_seconds = time.time() - self.start_time
 
-        if results.pose_landmarks and results.pose_world_landmarks: # ✅ Check for 3D landmarks
+        if results.pose_landmarks and results.pose_world_landmarks:
             try:
-                landmarks = results.pose_landmarks.landmark      # 2D (Screen)
-                world_landmarks = results.pose_world_landmarks.landmark # 3D (Meters)
-
-                # --- Helpers ---
+                landmarks = results.pose_landmarks.landmark
+                world_landmarks = results.pose_world_landmarks.landmark
                 def get_2d(lm): return [lm.x, lm.y]
-                def get_3d(lm): return [lm.x, lm.y, lm.z] # Get Z-axis too!
+                def get_3d(lm): return [lm.x, lm.y, lm.z]
                 
-                # --- Decide Left or Right (Based on 2D visibility) ---
                 l_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
                 l_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value]
                 r_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
@@ -132,17 +118,13 @@ class SitToStandLogic:
                     self.current_side = "RIGHT"; hip_idx, knee_idx, ankle_idx, shoulder_idx = 24, 26, 28, 12
 
                 selected_knee_vis = landmarks[knee_idx].visibility
-                
                 if selected_knee_vis < VISIBILITY_THRESHOLD:
                     feedback = "LOW VISIBILITY"; feedback_color = (0, 0, 255)
                 else:
-                    # --- Data Extraction ---
-                    # 1. Get 3D Points for Knee Angle (Corrects for 45 degree view)
                     hip_3d = get_3d(world_landmarks[hip_idx])
                     knee_3d = get_3d(world_landmarks[knee_idx])
                     ankle_3d = get_3d(world_landmarks[ankle_idx])
 
-                    # 2. Get 2D Points for Visual Checks (Stance & Leaning)
                     hip_2d = get_2d(landmarks[hip_idx])
                     knee_2d = get_2d(landmarks[knee_idx])
                     shoulder_2d = get_2d(landmarks[shoulder_idx])
@@ -152,33 +134,22 @@ class SitToStandLogic:
                     r_ankle_2d = get_2d(landmarks[28])
                     l_ankle_2d = get_2d(landmarks[27])
 
-                    # --- Calculations ---
-                    # ✅ Use 3D Angle for Counting
                     raw_angle = calculate_angle_3d(hip_3d, knee_3d, ankle_3d)
                     self.angle_buffer.append(raw_angle)
                     current_angle = sum(self.angle_buffer) / len(self.angle_buffer)
                     
-                    # ✅ Use 2D for Stance/Posture (Visual feedback)
-                    # Note: We intentionally use 2D Angle here for Lean check consistency with screen
                     angle_2d = calculate_angle(hip_2d, knee_2d, get_2d(landmarks[ankle_idx]))
-                    
                     torso_lean = calculate_vertical_angle(shoulder_2d, hip_2d)
                     shoulder_width = calculate_distance(l_shoulder_2d, r_shoulder_2d)
                     feet_width = calculate_distance(l_ankle_2d, r_ankle_2d)
                     stance_ratio = 0 if shoulder_width == 0 else feet_width / shoulder_width
 
-                    # --- Drawing Angle Text ---
                     knee_px = tuple(np.multiply(knee_2d, [target_w, new_h]).astype(int))
                     cv2.putText(image, str(int(current_angle)), knee_px, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-                    # --- Feedback Logic ---
                     potential_bad_posture = False; temp_feedback = ""
-                    
-                    # Check Stance (Visual Width)
                     if stance_ratio < MIN_FEET_RATIO and current_angle > 150: potential_bad_posture = True; temp_feedback = "NARROW STANCE!"
                     elif stance_ratio > MAX_FEET_RATIO and current_angle > 150: potential_bad_posture = True; temp_feedback = "WIDE STANCE!"
-                    
-                    # Check Lean (Using 2D angle for context, 100-160 is mid-rep)
                     elif torso_lean > LEAN_THRESHOLD and (100 < angle_2d < 160): potential_bad_posture = True; temp_feedback = "DONT LEAN!"
                     
                     if potential_bad_posture: self.bad_posture_counter += 1
@@ -195,12 +166,11 @@ class SitToStandLogic:
                         feedback = "STAND UP FULLY!"; feedback_color = (0, 165, 255); self.current_rep_error = True
                     else: feedback = "GOOD FORM"; feedback_color = (0, 255, 0)
 
-                    # --- Counting Logic (Based on 3D Angle) ---
-                    if current_angle > 165: # Slightly higher threshold for 3D accuracy
+                    if current_angle > 165: 
                         self.stage = "up"
                         if feedback == "GOOD FORM": self.current_rep_error = False; self.bad_posture_counter = 0; self.incomplete_stand_counter = 0
                     
-                    if current_angle < 100 and self.stage == 'up': # Higher sit threshold for 3D
+                    if current_angle < 100 and self.stage == 'up':
                         self.stage = "down"; self.counter += 1
                         if not self.current_rep_error: self.rep_quality_history.append(1) 
                         else: self.rep_quality_history.append(0) 
@@ -251,8 +221,6 @@ with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=Fa
         2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe** at all times.
         3.  **💡 Lighting:** Use a well-lit room and avoid wearing clothes that blend into the background.
         
-        
-
         ---
         ### 📝 How to Use
         * **Webcam:** 1. Click **"Allow"** for camera permission.
@@ -289,7 +257,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v33", 
+        key="sts-webcam-safe-v36", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -315,8 +283,10 @@ if mode == "Webcam (Live)":
             
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
             ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
+            
             ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
             ax1.axhline(y=100, color='r', linestyle='--', label='Sit (100°)')
+            
             ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
             
             labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
@@ -335,12 +305,10 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # Limit Check
         MAX_FILE_SIZE = 200 * 1024 * 1024
         if uploaded_file.size > MAX_FILE_SIZE:
             st.error(f"❌ File too large! Please upload a video smaller than 200MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
-            # Hashing logic
             uploaded_file.seek(0)
             file_bytes = uploaded_file.read(2 * 1024 * 1024) 
             file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -353,12 +321,8 @@ elif mode == "Video File":
             output_path = os.path.join(tempfile.gettempdir(), output_filename)
             stats_key = f"stats_{file_id}"
 
-            # -----------------------------------------------------------
-            # CASE 1: Load from Cache
-            # -----------------------------------------------------------
             if os.path.exists(output_path) and stats_key in st.session_state:
                 stats = st.session_state[stats_key]
-                
                 if st.session_state.get("just_processed") == file_id:
                     st.success("✅ Analysis Complete!")
                     del st.session_state["just_processed"]
@@ -382,8 +346,10 @@ elif mode == "Video File":
                 
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
                 ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
+                
                 ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
                 ax1.axhline(y=100, color='r', linestyle='--', label='Sit (100°)')
+                
                 ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
                 labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
                 bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
@@ -392,9 +358,6 @@ elif mode == "Video File":
                 st.pyplot(fig)
                 plt.close(fig)
 
-            # -----------------------------------------------------------
-            # CASE 2: Video exists but Stats missing (Rebooted)
-            # -----------------------------------------------------------
             elif os.path.exists(output_path) and stats_key not in st.session_state:
                  st.success("✅ Analysis Loaded from Cache!")
                  st.video(output_path)
@@ -402,33 +365,25 @@ elif mode == "Video File":
                     st.download_button(label="⬇️ Download Analyzed Video", data=file, file_name="analyzed_sts.mp4", mime="video/mp4")
                  st.info("ℹ️ Rename the file or re-upload to force new processing.")
 
-            # -----------------------------------------------------------
-            # CASE 3: Process New File
-            # -----------------------------------------------------------
             else:
                 status_container = st.empty()
-                
+                # ✅ 1. Save uploaded file to Temp
+                # We skip "Optimizing/Converting" and pass this direct to OpenCV
                 with status_container.container():
-                    with st.spinner("🔄 Optimizing video format... (Preparing for analysis)"):
-                        raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-                        raw_tfile.write(uploaded_file.read())
-                        raw_tfile.close()
-                        
-                        sanitized_input = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                        os.system(f"ffmpeg -y -i {raw_tfile.name} -vcodec libx264 -acodec aac {sanitized_input} -hide_banner -loglevel error")
-                
-                status_container.empty()
+                    raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
+                    raw_tfile.write(uploaded_file.read())
+                    raw_tfile.close()
 
-                cap = cv2.VideoCapture(sanitized_input)
+                # ✅ 2. Open Video directly (No pre-processing)
+                cap = cv2.VideoCapture(raw_tfile.name)
                 
                 if not cap.isOpened():
-                    st.error("Error: Could not open video file.")
+                    st.error(f"Error: Could not open video file. Please ensure it is a standard MP4/MOV/AVI.")
                 else:
                     logic = SitToStandLogic()
                     angle_data = []; time_data = []
                     fps = cap.get(cv2.CAP_PROP_FPS)
                     temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                    
                     target_w = 1280 
                     original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -436,28 +391,26 @@ elif mode == "Video File":
                         scale = target_w / original_w
                         target_h = int(original_h * scale)
                     else: target_w = original_w; target_h = original_h
-                    
                     out = None
                     frame_count = 0
                     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
                     progress_bar = status_container.progress(0, text="Analyzing video frames... 0%")
                     
                     while cap.isOpened():
                         ret, frame = cap.read()
                         if not ret: break
                         processed_img, angle, timestamp = logic.process_frame(frame)
-                        
                         if out is None:
                             h, w = processed_img.shape[:2]
                             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                             out = cv2.VideoWriter(temp_output, fourcc, fps, (w, h))
-                        
                         out.write(processed_img)
                         angle_data.append(angle)
                         time_data.append(timestamp)
                         frame_count += 1
                         
+                        if frame_count % 50 == 0: gc.collect()
+
                         if total_frames > 0:
                             progress = min(frame_count / total_frames, 1.0)
                             percent_text = f"Analyzing video frames... {int(progress * 100)}%"
@@ -470,17 +423,14 @@ elif mode == "Video File":
                     if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
                              os.system(f"ffmpeg -y -i {temp_output} -vcodec libx264 {output_path} -hide_banner -loglevel error")
-                        
                         st.session_state[stats_key] = {
                             "reps": logic.rep_quality_history,
                             "angles": angle_data,
                             "times": time_data
                         }
-                        
                         st.session_state["just_processed"] = file_id
                         st.rerun() 
                     
                     if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
-                    if os.path.exists(sanitized_input): os.remove(sanitized_input)
                     if os.path.exists(temp_output): os.remove(temp_output)
                     gc.collect()
