@@ -6,6 +6,7 @@ import uuid
 import hashlib
 import psutil
 import ctypes
+import threading # ✅ เพิ่ม Threading เพื่อให้ทำงานคู่ขนานได้
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -26,6 +27,38 @@ import tempfile
 import matplotlib.pyplot as plt
 
 # ==========================================
+# 🛡️ GLOBAL RAM MONITOR (Background Thread)
+# ==========================================
+def get_current_memory_mb():
+    try:
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024
+    except:
+        return 0
+
+def start_ram_monitor():
+    """Starts a background thread that prints RAM usage every 3 seconds."""
+    # เช็คว่ามี Thread นี้รันอยู่แล้วหรือยัง (ป้องกันการรันซ้อน)
+    for t in threading.enumerate():
+        if t.name == "RamMonitor":
+            return
+
+    def monitor_loop():
+        while True:
+            mem = get_current_memory_mb()
+            # Print Log ออกมาตลอดเวลา (Flush=True เพื่อให้เห็นทันที)
+            print(f"📈 [System Monitor] RAM Usage: {mem:.1f} MB", flush=True)
+            time.sleep(3)
+
+    # สร้าง Daemon Thread (จะตายเองเมื่อปิดแอพ)
+    t = threading.Thread(target=monitor_loop, name="RamMonitor", daemon=True)
+    t.start()
+    print("✅ RAM Monitor Thread Started!", flush=True)
+
+# 🚀 สั่งรัน Monitor ทันทีที่โหลดไฟล์
+start_ram_monitor()
+
+# ==========================================
 # ⚙️ Configuration
 # ==========================================
 mp_drawing = mp.solutions.drawing_utils
@@ -40,12 +73,8 @@ BAD_POSTURE_DELAY = 3
 INCOMPLETE_STAND_DELAY = 15
 
 # ==========================================
-# 🛡️ Memory Guard & Monitor
+# 🛡️ Memory Guard Functions
 # ==========================================
-def get_current_memory_mb():
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / 1024 / 1024
-
 def check_memory_safe(limit_mb=3000):
     current_mem_mb = get_current_memory_mb()
     if current_mem_mb > limit_mb:
@@ -89,7 +118,7 @@ def calculate_vertical_angle(a, b):
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
-        # ✅ Standard Model (High Accuracy)
+        # ✅ Standard Model
         self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=1)
         self.counter = 0; self.stage = None; self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
@@ -281,7 +310,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v44", 
+        key="sts-webcam-safe-v45", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -423,7 +452,6 @@ elif mode == "Video File":
                     
                     stop_flag = False
                     stop_reason = ""
-                    last_log_time = time.time()
 
                     while cap.isOpened():
                         # 🛡️ MEMORY GUARD CHECK
@@ -434,14 +462,6 @@ elif mode == "Video File":
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
-                        # 🕒 LOG RAM EVERY 3 SECONDS (Console Only) - WITH FLUSH=TRUE
-                        current_time = time.time()
-                        if current_time - last_log_time >= 3:
-                            current_mem = get_current_memory_mb()
-                            # ✅ Added flush=True to make logs appear instantly
-                            print(f"📈 [3s Log] Current RAM: {current_mem:.1f} MB", flush=True)
-                            last_log_time = current_time
-                        
                         ret, frame = cap.read()
                         if not ret: break
 
