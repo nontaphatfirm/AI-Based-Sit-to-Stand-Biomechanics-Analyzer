@@ -4,7 +4,7 @@ import time
 import gc
 import uuid
 import hashlib
-import psutil  # ✅ เพิ่ม Library สำหรับดู RAM
+import psutil
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -25,7 +25,7 @@ import tempfile
 import matplotlib.pyplot as plt
 
 # ==========================================
-# ⚙️ Configuration & Thresholds
+# ⚙️ Configuration
 # ==========================================
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
@@ -39,27 +39,20 @@ BAD_POSTURE_DELAY = 3
 INCOMPLETE_STAND_DELAY = 15
 
 # ==========================================
-# 🛡️ Memory Guard Function
+# 🛡️ Memory Guard (Tuned Up)
 # ==========================================
-def check_memory_safe(limit_mb=850):
-    """
-    Check current memory usage.
-    Returns False if memory usage exceeds the limit (DANGER).
-    """
+def get_current_memory_mb():
     process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    current_mem_mb = mem_info.rss / 1024 / 1024  # Convert Bytes to MB
-    
-    # Print log to console (Server logs)
-    # print(f"🧠 RAM Usage: {current_mem_mb:.2f} MB") 
-    
+    return process.memory_info().rss / 1024 / 1024
+
+def check_memory_safe(limit_mb=950): # 👈 Increased to 950MB
+    current_mem_mb = get_current_memory_mb()
     if current_mem_mb > limit_mb:
-        print(f"⚠️ DANGER: Memory exceeded {limit_mb}MB! Initiating Emergency Stop.")
-        return False # Not Safe
-    return True # Safe
+        return False, current_mem_mb
+    return True, current_mem_mb
 
 # ==========================================
-# 📐 Helper Functions
+# 📐 Helper Functions (Same as before)
 # ==========================================
 def calculate_angle(a, b, c):
     a = np.array(a); b = np.array(b); c = np.array(c)
@@ -277,7 +270,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v37", 
+        key="sts-webcam-safe-v38", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -329,6 +322,9 @@ elif mode == "Video File":
         if uploaded_file.size > MAX_FILE_SIZE:
             st.error(f"❌ File too large! Please upload a video smaller than 200MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
+            # 🧹 FORCE CLEANUP: ล้างขยะก่อนเริ่มงานเสมอ
+            gc.collect()
+            
             uploaded_file.seek(0)
             file_bytes = uploaded_file.read(2 * 1024 * 1024) 
             file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -387,8 +383,6 @@ elif mode == "Video File":
 
             else:
                 status_container = st.empty()
-                
-                # ✅ NO OPTIMIZATION (Use direct file)
                 with status_container.container():
                      raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
                      raw_tfile.write(uploaded_file.read())
@@ -416,12 +410,15 @@ elif mode == "Video File":
                     progress_bar = status_container.progress(0, text="Analyzing video frames... 0%")
                     
                     stop_flag = False
+                    stop_reason = ""
 
                     while cap.isOpened():
-                        # ✅ MEMORY GUARD: Check every 30 frames
+                        # ✅ MEMORY GUARD: Threshold increased to 950MB
                         if frame_count % 30 == 0:
-                            if not check_memory_safe(limit_mb=850):
+                            safe, mem_usage = check_memory_safe(limit_mb=950)
+                            if not safe:
                                 stop_flag = True
+                                stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
                         ret, frame = cap.read()
@@ -448,12 +445,17 @@ elif mode == "Video File":
                     status_container.empty()
                     
                     if stop_flag:
-                        st.error("⚠️ **System Warning:** Analysis stopped early because the server ran out of memory.")
-                        st.warning("ℹ️ **Suggestion:** Please try uploading a shorter video or a file with lower resolution.")
-                        # Clean up
-                        if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
-                        if os.path.exists(temp_output): os.remove(temp_output)
-                        gc.collect()
+                        st.error(f"⚠️ **System Warning:** Stopped due to memory limit! (Current: {stop_reason})")
+                        st.warning("ℹ️ **Action:** Cleared temporary files. Please try a shorter video.")
+                        
+                        # 🧹 FORCE DELETE FILES ON ERROR
+                        try:
+                            if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
+                            if os.path.exists(temp_output): os.remove(temp_output)
+                        except Exception as e:
+                            print(f"Cleanup Error: {e}")
+                        
+                        gc.collect() # Force RAM cleanup
 
                     elif os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
@@ -466,6 +468,7 @@ elif mode == "Video File":
                         st.session_state["just_processed"] = file_id
                         st.rerun() 
                     
+                    # 🧹 Normal Cleanup
                     if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                     if os.path.exists(temp_output): os.remove(temp_output)
                     gc.collect()
