@@ -90,8 +90,10 @@ def calculate_vertical_angle(a, b):
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
-        # ⚡ USE LITE MODEL (complexity=0)
-        self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=0)
+        # 🔄 REVERTED TO MODEL_COMPLEXITY=1 (Standard)
+        # Reason: Streamlit Cloud blocks downloading the 'Lite' model (complexity=0) due to permissions.
+        # We save RAM using frame skipping and resizing instead.
+        self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=1)
         self.counter = 0; self.stage = None; self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
         self.rep_quality_history = [] 
@@ -281,7 +283,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v40", 
+        key="sts-webcam-safe-v41", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
