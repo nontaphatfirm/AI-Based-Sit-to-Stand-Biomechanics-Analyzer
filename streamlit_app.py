@@ -83,7 +83,7 @@ INCOMPLETE_STAND_DELAY = 15
 # ==========================================
 # 🛡️ Memory Guard Functions
 # ==========================================
-def check_memory_safe(limit_mb=1500): # 👈 Set limit to 1.5 GB
+def check_memory_safe(limit_mb=1500): # 👈 LIMIT 1.5 GB
     current_mem_mb = get_current_memory_mb()
     if current_mem_mb > limit_mb:
         return False, current_mem_mb
@@ -252,15 +252,29 @@ class SitToStandLogic:
 # ==========================================
 st.set_page_config(page_title="STS Analyzer", layout="wide")
 
-# ❌ REMOVED SIDEBAR TOOLS AS REQUESTED
-
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
+
+# 🗝️ DYNAMIC KEY GENERATION (To fix thread hanging issues)
+if "webrtc_key" not in st.session_state:
+    st.session_state["webrtc_key"] = f"sts-v1-{uuid.uuid4()}"
 
 if "user_session_id" not in st.session_state:
     st.session_state["user_session_id"] = str(uuid.uuid4())[:8]
 
 if "webcam_results" not in st.session_state: st.session_state["webcam_results"] = None
+
+# 🚨 GLOBAL SAFETY CHECK BEFORE RENDERING
+safe, mem_usage = check_memory_safe(1500)
+if not safe:
+    st.error(f"⚠️ **Memory Critical ({mem_usage:.1f} MB)**: System has auto-reset to prevent crash.")
+    st.warning("🔄 Please refresh the browser manually if the app doesn't reload.")
+    # Nuke everything
+    st.cache_resource.clear()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    nuclear_cleanup()
+    st.stop() # Force stop everything
 
 mode = st.radio("Select Input Source:", ("Webcam (Live)", "Video File"))
 
@@ -283,16 +297,28 @@ if mode == "Webcam (Live)":
             self.logic = SitToStandLogic()
             self.angle_history = []
             self.time_history = []
+            self.frame_count = 0
         
         def recv(self, frame):
             try:
+                # 🛡️ WEBCAM MEMORY GUARD (Check every 10 frames)
+                self.frame_count += 1
+                if self.frame_count % 10 == 0:
+                    safe, _ = check_memory_safe(1500)
+                    if not safe:
+                        # 💥 Raise error to stop the stream immediately
+                        raise Exception("Memory Limit Exceeded")
+
                 img = frame.to_ndarray(format="bgr24")
                 img = cv2.flip(img, 1)
                 processed_img, angle, timestamp = self.logic.process_frame(img)
                 self.angle_history.append(angle)
                 self.time_history.append(timestamp)
                 return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-            except Exception: return frame
+            except Exception as e:
+                # If memory full, this will stop the stream
+                print(f"Stream Stopped: {e}")
+                raise e # Propagate error to shutdown stream
         
         def get_stats(self):
             return {
@@ -302,8 +328,10 @@ if mode == "Webcam (Live)":
             }
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
+    
+    # 🔑 Using Dynamic Key to force new thread on reset
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v48", 
+        key=st.session_state["webrtc_key"], 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -327,7 +355,6 @@ if mode == "Webcam (Live)":
             col2.metric("Good Form", correct_reps)
             col3.metric("Accuracy", f"{accuracy:.1f}%")
             
-            # ✅ SAFE GRAPH RENDERING
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
             ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
             ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
@@ -338,7 +365,6 @@ if mode == "Webcam (Live)":
             ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
             for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
             
-            # Use buffer instead of direct pyplot to avoid Missing File Error
             buf = io.BytesIO()
             fig.savefig(buf, format="png")
             buf.seek(0)
@@ -347,6 +373,7 @@ if mode == "Webcam (Live)":
             
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
+                st.session_state["webrtc_key"] = f"sts-v1-{uuid.uuid4()}" # 🔄 NEW KEY GENERATED
                 del ctx 
                 nuclear_cleanup() 
                 st.rerun()
@@ -355,8 +382,7 @@ elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        # 📉 Limit to 100MB as requested
-        MAX_FILE_SIZE = 100 * 1024 * 1024 
+        MAX_FILE_SIZE = 100 * 1024 * 1024 # 📉 100MB Limit
         if uploaded_file.size > MAX_FILE_SIZE:
             st.error(f"❌ File too large! Please upload a video smaller than 100MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
@@ -397,7 +423,6 @@ elif mode == "Video File":
                 col2.metric("Good Form", correct_reps)
                 col3.metric("Accuracy", f"{accuracy:.1f}%")
                 
-                # ✅ SAFE GRAPH RENDERING
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
                 ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
                 ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
@@ -456,14 +481,19 @@ elif mode == "Video File":
                     last_log_time = time.time()
 
                     while cap.isOpened():
-                        # 🛡️ MEMORY GUARD CHECK: 1.5GB LIMIT
                         if frame_count % 30 == 0:
-                            safe, mem_usage = check_memory_safe(limit_mb=1500) # 👈 1.5 GB Limit
+                            safe, mem_usage = check_memory_safe(1500)
                             if not safe:
                                 stop_flag = True
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
+                        # Log RAM
+                        current_time = time.time()
+                        if current_time - last_log_time >= 3:
+                            current_mem = get_current_memory_mb()
+                            last_log_time = current_time
+                        
                         ret, frame = cap.read()
                         if not ret: break
 
@@ -490,24 +520,19 @@ elif mode == "Video File":
                     log_container.empty()
                     
                     if stop_flag:
-                        # 🚨 SYSTEM SELF-DESTRUCT (RESET)
                         st.error(f"⚠️ **Memory Limit Exceeded (1.5GB)!** System has been reset.")
                         st.error("🔄 **Please Refresh the Page to Continue.**")
                         
-                        # Kill variables
                         del cap, out, logic, angle_data, time_data
-                        
-                        # Wipe Files
                         try:
                             if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                             if os.path.exists(temp_output): os.remove(temp_output)
                         except Exception: pass
                         
-                        # Wipe Session & Cache
                         st.cache_resource.clear()
                         st.session_state.clear()
                         nuclear_cleanup()
-                        st.stop() # 🛑 Stop Execution Here
+                        st.stop()
                         
                     elif os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
