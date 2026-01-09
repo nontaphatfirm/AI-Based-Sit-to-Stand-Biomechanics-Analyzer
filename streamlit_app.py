@@ -7,6 +7,7 @@ import hashlib
 import psutil
 import ctypes
 import threading
+import io
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -27,9 +28,8 @@ import tempfile
 import matplotlib.pyplot as plt
 
 # ==========================================
-# 🧹 GLOBAL CLEANUP ON STARTUP (Fix Refresh Issue)
+# 🧹 GLOBAL CLEANUP ON STARTUP
 # ==========================================
-# ฟังก์ชันนี้จะทำงานทุกครั้งที่ User กด Refresh หน้าเว็บ หรือ Script รันใหม่
 def nuclear_cleanup():
     """Force release memory back to OS immediately."""
     gc.collect()
@@ -38,7 +38,6 @@ def nuclear_cleanup():
     except Exception:
         pass
 
-# เรียกใช้ทันทีที่บรรทัดแรก เพื่อเคลียร์ขยะจาก Session ก่อนหน้า
 nuclear_cleanup()
 
 # ==========================================
@@ -58,7 +57,7 @@ def start_ram_monitor():
     def monitor_loop():
         while True:
             mem = get_current_memory_mb()
-            # Print Log ทุก 3 วินาที
+            # Print Log ทุก 3 วินาที (หลังบ้าน)
             print(f"📈 [System Monitor] RAM Usage: {mem:.1f} MB", flush=True)
             time.sleep(3)
     t = threading.Thread(target=monitor_loop, name="RamMonitor", daemon=True)
@@ -84,7 +83,7 @@ INCOMPLETE_STAND_DELAY = 15
 # ==========================================
 # 🛡️ Memory Guard Functions
 # ==========================================
-def check_memory_safe(limit_mb=3000):
+def check_memory_safe(limit_mb=1500): # 👈 Set limit to 1.5 GB
     current_mem_mb = get_current_memory_mb()
     if current_mem_mb > limit_mb:
         return False, current_mem_mb
@@ -253,15 +252,7 @@ class SitToStandLogic:
 # ==========================================
 st.set_page_config(page_title="STS Analyzer", layout="wide")
 
-# 🔴 SIDEBAR: Emergency Memory Cleanup
-with st.sidebar:
-    st.header("🔧 Tools")
-    st.write(f"RAM: {get_current_memory_mb():.1f} MB")
-    if st.button("🗑️ Clear RAM (Hard Reset)"):
-        st.cache_resource.clear()
-        st.session_state.clear()
-        nuclear_cleanup()
-        st.rerun()
+# ❌ REMOVED SIDEBAR TOOLS AS REQUESTED
 
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Runs on iPad/iPhone/Android/PC")
@@ -283,14 +274,6 @@ with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=Fa
             * *Why?* This allows the AI to accurately measure **BOTH** your **Knee Angle** (for counting) and **Stance Width** (for posture check).
         2.  **📏 Full Body:** Ensure your **entire body** is visible from **Head to Toe** at all times.
         3.  **💡 Lighting:** Use a well-lit room and avoid wearing clothes that blend into the background.
-        
-        ---
-        ### 📝 How to Use
-        * **Webcam:** 1. Click **"Allow"** for camera permission.
-            2. Click **"SELECT DEVICE"** to choose your camera (Front/Back).
-            3. Click **"START"** to begin.
-        * **Video File:** Upload a video (`.mp4`, max 200MB) recorded with the positioning above.
-        * **Troubleshooting:** If the webcam freezes or fails to load, please switch to a **Mobile Hotspot**.
         """
     )
 
@@ -320,7 +303,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v46", 
+        key="sts-webcam-safe-v48", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -344,37 +327,39 @@ if mode == "Webcam (Live)":
             col2.metric("Good Form", correct_reps)
             col3.metric("Accuracy", f"{accuracy:.1f}%")
             
+            # ✅ SAFE GRAPH RENDERING
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
             ax1.plot(data["time_history"], data["angle_history"], label='Knee Angle', color='blue')
-            
             ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
             ax1.axhline(y=100, color='r', linestyle='--', label='Sit (100°)')
-            
             ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
-            
             labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
             bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
             ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
             for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
-            st.pyplot(fig)
+            
+            # Use buffer instead of direct pyplot to avoid Missing File Error
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png")
+            buf.seek(0)
+            st.image(buf, caption="Session Analysis", use_container_width=True)
             plt.close(fig)
             
-            # ✅ IMPROVED RESET LOGIC
             if st.button("Start New Session"):
                 st.session_state["webcam_results"] = None
-                del ctx # Force release webrtc context
-                nuclear_cleanup() # Nuclear Clean!
+                del ctx 
+                nuclear_cleanup() 
                 st.rerun()
 
 elif mode == "Video File":
     uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
     
     if uploaded_file is not None:
-        MAX_FILE_SIZE = 200 * 1024 * 1024
+        # 📉 Limit to 100MB as requested
+        MAX_FILE_SIZE = 100 * 1024 * 1024 
         if uploaded_file.size > MAX_FILE_SIZE:
-            st.error(f"❌ File too large! Please upload a video smaller than 200MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
+            st.error(f"❌ File too large! Please upload a video smaller than 100MB. (Your file: {uploaded_file.size / (1024*1024):.1f} MB)")
         else:
-            # 🧹 PRE-CLEANUP BEFORE PROCESSING
             nuclear_cleanup()
             
             uploaded_file.seek(0)
@@ -412,18 +397,21 @@ elif mode == "Video File":
                 col2.metric("Good Form", correct_reps)
                 col3.metric("Accuracy", f"{accuracy:.1f}%")
                 
+                # ✅ SAFE GRAPH RENDERING
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
                 ax1.plot(stats["times"], stats["angles"], label='Knee Angle', color='blue')
-                
                 ax1.axhline(y=165, color='g', linestyle='--', label='Stand (165°)')
                 ax1.axhline(y=100, color='r', linestyle='--', label='Sit (100°)')
-                
                 ax1.set_title('Knee Angle Movement Analysis'); ax1.grid(True); ax1.legend()
                 labels = ['Correct', 'Incorrect']; counts = [correct_reps, total_reps - correct_reps]
                 bars = ax2.bar(labels, counts, color=['#28a745', '#dc3545'])
                 ax2.set_title('Repetition Quality'); ax2.set_ylabel('Count')
                 for bar in bars: ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
-                st.pyplot(fig)
+                
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png")
+                buf.seek(0)
+                st.image(buf, caption="Session Analysis", use_container_width=True)
                 plt.close(fig)
 
             elif os.path.exists(output_path) and stats_key not in st.session_state:
@@ -468,21 +456,14 @@ elif mode == "Video File":
                     last_log_time = time.time()
 
                     while cap.isOpened():
-                        # 🛡️ MEMORY GUARD CHECK
+                        # 🛡️ MEMORY GUARD CHECK: 1.5GB LIMIT
                         if frame_count % 30 == 0:
-                            safe, mem_usage = check_memory_safe(limit_mb=3000)
+                            safe, mem_usage = check_memory_safe(limit_mb=1500) # 👈 1.5 GB Limit
                             if not safe:
                                 stop_flag = True
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
-                        # 🕒 LOG RAM EVERY 3 SECONDS
-                        current_time = time.time()
-                        if current_time - last_log_time >= 3:
-                            current_mem = get_current_memory_mb()
-                            # print(f"📈 [3s Log] Current RAM: {current_mem:.1f} MB", flush=True) # Already in global thread
-                            last_log_time = current_time
-                        
                         ret, frame = cap.read()
                         if not ret: break
 
@@ -496,7 +477,6 @@ elif mode == "Video File":
                         time_data.append(timestamp)
                         frame_count += 1
                         
-                        # Aggressive GC
                         if frame_count % 50 == 0: nuclear_cleanup()
 
                         if total_frames > 0:
@@ -510,16 +490,24 @@ elif mode == "Video File":
                     log_container.empty()
                     
                     if stop_flag:
-                        st.error(f"⚠️ **System Warning:** Stopped due to memory limit! (Current: {stop_reason})")
-                        st.warning("ℹ️ **Action:** RAM has been aggressively cleared.")
+                        # 🚨 SYSTEM SELF-DESTRUCT (RESET)
+                        st.error(f"⚠️ **Memory Limit Exceeded (1.5GB)!** System has been reset.")
+                        st.error("🔄 **Please Refresh the Page to Continue.**")
                         
+                        # Kill variables
                         del cap, out, logic, angle_data, time_data
+                        
+                        # Wipe Files
                         try:
                             if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                             if os.path.exists(temp_output): os.remove(temp_output)
                         except Exception: pass
                         
+                        # Wipe Session & Cache
+                        st.cache_resource.clear()
+                        st.session_state.clear()
                         nuclear_cleanup()
+                        st.stop() # 🛑 Stop Execution Here
                         
                     elif os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
@@ -532,7 +520,6 @@ elif mode == "Video File":
                         st.session_state["just_processed"] = file_id
                         st.rerun() 
                     
-                    # Normal Cleanup
                     if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                     if os.path.exists(temp_output): os.remove(temp_output)
                     nuclear_cleanup()
