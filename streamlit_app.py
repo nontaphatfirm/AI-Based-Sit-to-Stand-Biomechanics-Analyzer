@@ -5,7 +5,7 @@ import gc
 import uuid
 import hashlib
 import psutil
-import ctypes # ☢️ Library สำหรับสั่งคืน RAM ระดับ OS
+import ctypes
 
 # -------------------------------------------------------------------------
 # 🔧 FORCED CPU MODE
@@ -40,7 +40,7 @@ BAD_POSTURE_DELAY = 3
 INCOMPLETE_STAND_DELAY = 15
 
 # ==========================================
-# 🛡️ Memory Guard & Cleanup Tools
+# 🛡️ Memory Guard & Monitor
 # ==========================================
 def get_current_memory_mb():
     process = psutil.Process(os.getpid())
@@ -53,13 +53,12 @@ def check_memory_safe(limit_mb=3000):
     return True, current_mem_mb
 
 def force_memory_cleanup():
-    """☢️ The Nuclear Option: Force release memory back to OS"""
+    """☢️ Force release memory back to OS"""
     gc.collect()
     try:
-        # เฉพาะ Linux/Streamlit Cloud เท่านั้นที่ใช้คำสั่งนี้ได้
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except Exception:
-        pass # ถ้าเป็น Windows ก็ข้ามไป
+        pass
 
 # ==========================================
 # 📐 Helper Functions
@@ -90,9 +89,7 @@ def calculate_vertical_angle(a, b):
 # ==========================================
 class SitToStandLogic:
     def __init__(self):
-        # 🔄 REVERTED TO MODEL_COMPLEXITY=1 (Standard)
-        # Reason: Streamlit Cloud blocks downloading the 'Lite' model (complexity=0) due to permissions.
-        # We save RAM using frame skipping and resizing instead.
+        # ✅ Revert to Standard Model (Better Accuracy)
         self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7, model_complexity=1)
         self.counter = 0; self.stage = None; self.start_time = None
         self.angle_buffer = deque(maxlen=SMOOTH_WINDOW)
@@ -103,7 +100,8 @@ class SitToStandLogic:
     def process_frame(self, image):
         if self.start_time is None: self.start_time = time.time()
         
-        target_w = 640 # 📉 Optimize resolution
+        # ✅ Revert to High Resolution (1280p)
+        target_w = 1280 
         h, w, c = image.shape
         if w > target_w:
             scale = target_w / w
@@ -283,7 +281,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v41", 
+        key="sts-webcam-safe-v42", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -396,6 +394,8 @@ elif mode == "Video File":
 
             else:
                 status_container = st.empty()
+                log_container = st.empty() # ✅ UI Container for Logs
+
                 with status_container.container():
                      raw_tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
                      raw_tfile.write(uploaded_file.read())
@@ -424,29 +424,35 @@ elif mode == "Video File":
                     
                     stop_flag = False
                     stop_reason = ""
+                    last_log_time = time.time()
 
                     while cap.isOpened():
-                        # 🛡️ MEMORY GUARD CHECK: 3000MB Limit
+                        # 🛡️ MEMORY GUARD CHECK
                         if frame_count % 30 == 0:
                             safe, mem_usage = check_memory_safe(limit_mb=3000)
                             if not safe:
                                 stop_flag = True
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
+
+                        # 🕒 LOG RAM EVERY 15 SECONDS
+                        current_time = time.time()
+                        if current_time - last_log_time >= 15:
+                            current_mem = get_current_memory_mb()
+                            print(f"📈 [15s Log] Current RAM: {current_mem:.1f} MB")
+                            log_container.info(f"📊 Live RAM Usage: {current_mem:.1f} MB")
+                            last_log_time = current_time
                         
                         ret, frame = cap.read()
                         if not ret: break
 
-                        # ⏭️ FRAME SKIPPING: Process every 3rd frame
-                        if frame_count % 3 != 0:
-                            frame_count += 1
-                            continue
-
+                        # ❌ NO FRAME SKIPPING (As requested)
+                        
                         processed_img, angle, timestamp = logic.process_frame(frame)
                         if out is None:
                             h, w = processed_img.shape[:2]
                             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                            out = cv2.VideoWriter(temp_output, fourcc, fps / 3, (w, h))
+                            out = cv2.VideoWriter(temp_output, fourcc, fps, (w, h))
                         out.write(processed_img)
                         angle_data.append(angle)
                         time_data.append(timestamp)
@@ -463,19 +469,19 @@ elif mode == "Video File":
                     cap.release()
                     if out: out.release()
                     status_container.empty()
+                    log_container.empty() # Clear log after finish
                     
                     if stop_flag:
                         st.error(f"⚠️ **System Warning:** Stopped due to memory limit! (Current: {stop_reason})")
                         st.warning("ℹ️ **Action:** RAM has been aggressively cleared.")
                         
-                        # 🚨 FORCE RELEASE RESOURCES & CLEAN MEMORY
                         del cap, out, logic, angle_data, time_data
                         try:
                             if os.path.exists(raw_tfile.name): os.remove(raw_tfile.name)
                             if os.path.exists(temp_output): os.remove(temp_output)
                         except Exception: pass
                         
-                        force_memory_cleanup() # ☢️ Nuclear Clean
+                        force_memory_cleanup()
                         
                     elif os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                         with st.spinner("💾 Finalizing video file..."):
