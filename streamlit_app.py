@@ -281,7 +281,7 @@ if mode == "Webcam (Live)":
 
     st.info("💡 Instructions: Click 'START'. When finished, click 'STOP' to see results.")
     ctx = webrtc_streamer(
-        key="sts-webcam-safe-v43", 
+        key="sts-webcam-safe-v44", 
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": {"width": 1280, "height": 720, "frameRate": 30}, "audio": False},
@@ -434,11 +434,12 @@ elif mode == "Video File":
                                 stop_reason = f"{mem_usage:.1f} MB"
                                 break
 
-                        # 🕒 LOG RAM EVERY 3 SECONDS (Console Only)
+                        # 🕒 LOG RAM EVERY 3 SECONDS (Console Only) - WITH FLUSH=TRUE
                         current_time = time.time()
                         if current_time - last_log_time >= 3:
                             current_mem = get_current_memory_mb()
-                            print(f"📈 [3s Log] Current RAM: {current_mem:.1f} MB")
+                            # ✅ Added flush=True to make logs appear instantly
+                            print(f"📈 [3s Log] Current RAM: {current_mem:.1f} MB", flush=True)
                             last_log_time = current_time
                         
                         ret, frame = cap.read()
