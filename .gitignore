@@ -8,6 +8,7 @@ venv/
 env/
 .venv/
 ENV/
+venv310/
 
 # --- Build Artifacts (PyInstaller) ---
 build/
