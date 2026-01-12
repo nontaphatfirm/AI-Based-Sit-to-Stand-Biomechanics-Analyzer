@@ -119,19 +119,42 @@ Make sure you have Python 3.10 installed on your system.
 
 ## ⚙️ Technical Methodology
 
-1. **Pose Estimation:** Extracts 33 3D-landmarks using **MediaPipe BlazePose** (CNN-based).
-2. **Geometric Calculation:**
-* **3D Knee Angle:** Calculated using vector dot product in 3D space to ensure perspective invariance.
-* **Torso Lean:** Deviation of the Shoulder-Hip vector from the vertical axis.
+The system operates on a sophisticated pipeline designed to transform raw video frames into actionable clinical insights.
 
+### 1. Pose Estimation & Signal Processing
+* **Model Architecture:** Utilizes **MediaPipe BlazePose** (GHUM 3D), a high-fidelity topology model that predicts 33 body landmarks in real-time.
+* **Coordinate Systems:**
+    * **2D Normalized Coordinates $(x, y)$:** Used for UI overlay and posture metrics relative to the camera frame (e.g., Stance Width).
+    * **3D World Coordinates $(x, y, z)$:** Used for angular kinematics to ensure **perspective invariance**, allowing accurate analysis even from oblique camera angles (45°).
+* **Signal Smoothing:** A **Moving Average Filter** (Window Size $N=7$) is applied to the angular data stream to eliminate jitter and sensor noise.
 
-3. **State Machine:**
-* Operates as a finite state machine (`UP` ↔ `DOWN`).
-* Repetitions are counted only upon full cycle completion.
+### 2. Algorithmic Side Selection (Auto-Side Detection)
+To support unconstrained usage, the system automatically determines the "Active Side" (Left vs. Right) using a heuristic scoring algorithm:
+$$Score_{side} = (L_{thigh} \times 3.0) + V_{avg}$$
+Where:
+* $L_{thigh}$: Euclidean distance between Hip and Knee in 2D space (Projected length).
+* $V_{avg}$: Average visibility score of Hip and Knee landmarks provided by the model confidence.
+* **Logic:** The side with the higher score is selected as the active tracking side for the session.
 
+### 3. Biomechanical Calculations
+The core kinematic analysis relies on vector geometry:
 
-4. **Error Correction (Reset Logic):**
-* If a user commits a posture error but corrects it (returns to a perfect standing position), the system "forgives" the error for the current repetition to ensure fair assessment.
+* **Knee Flexion Angle ($\theta_{knee}$):** Calculated using the **3D Vector Dot Product** formula to measure the angle between the Thigh vector ($\vec{BA}$) and Shank vector ($\vec{BC}$):
+    $$\theta_{knee} = \arccos \left( \frac{\vec{BA} \cdot \vec{BC}}{||\vec{BA}|| \cdot ||\vec{BC}||} \right)$$
+    *(Where $B$=Knee, $A$=Hip, $C$=Ankle in 3D space)*
+
+* **Trunk Flexion (Torso Lean):** Calculated as the deviation of the trunk vector relative to the vertical gravity axis ($Y_{axis}$).
+
+### 4. Finite State Machine (FSM)
+Repetition counting is managed by a robust state machine to prevent false counts:
+
+1.  **State: STANDING** (Initial)
+    * Transition Condition: Knee Angle $> 165^\circ$
+2.  **State: SITTING** (Trigger Count)
+    * Transition Condition: Knee Angle $< 100^\circ$ AND Previous State was `STANDING`.
+    * **Action:** Increment Counter ($+1$).
+3.  **Error Handling (Debounce Logic):**
+    * Posture errors (e.g., Lean, Asymmetry) must persist for $> 3$ consecutive frames to trigger a warning, preventing flickering feedback.
 
 
 
@@ -156,7 +179,7 @@ SitToStand_Webcam_2026-01-12_14-30-00/
 **Nontapat Auetrongjit**
 
 * **Role:** Lead Developer & Researcher
-* **Project Status:** Active Development (v2.0.0)
+* **Project Status:** Active Development (v2.0)
 * **GitHub:** [https://github.com/nontaphatfirm](https://github.com/nontaphatfirm)
 
 ---
