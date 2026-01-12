@@ -1,21 +1,38 @@
-# Python caches
+# --- Python Basics ---
 __pycache__/
+*.py[cod]
+*$py.class
 
-# Virtual Environment
+# --- Virtual Environment ---
 venv/
 env/
+.venv/
+ENV/
 
-# PyInstaller (EXE build files)
+# --- Build Artifacts (PyInstaller) ---
 build/
 dist/
 *.spec
+*.egg-info/
+*.manifest
 
-# IDE settings
+# --- IDE & Editors ---
 .vscode/
 .idea/
+*.swp
 
-# Output folders
-Result_*/
-
-# System files
+# --- OS System Files ---
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Project Outputs ---
+# กันโฟลเดอร์ผลลัพธ์ที่คุณรันโปรแกรมออกมา
+Result_*/
+*_output/
+*.log
+
+# --- Security (สำคัญมาก) ---
+# กันไม่ให้เผลออัปโหลดไฟล์รหัสผ่าน/API Key
+.env
+.streamlit/secrets.toml
