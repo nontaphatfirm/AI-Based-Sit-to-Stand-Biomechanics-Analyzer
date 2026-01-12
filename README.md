@@ -10,7 +10,6 @@
 
 This tool performs real-time kinematic analysis of **Sit-to-Stand (STS)** movements using markerless pose estimation. It utilizes **MediaPipe BlazePose** to evaluate posture quality, count repetitions, and generate biomechanical reports without the need for wearable sensors. 
 
-**Now updated to v2.0 with 3D Biomechanics Logic & Auto-Side Detection!**
 
 ---
 
