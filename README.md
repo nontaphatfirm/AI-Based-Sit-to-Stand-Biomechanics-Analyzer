@@ -164,7 +164,6 @@ SitToStand_Webcam_2026-01-12_14-30-00/
 * **Role:** Lead Developer & Researcher
 * **Project Status:** Active Development (v2.0)
 * **GitHub:** [https://github.com/nontaphatfirm](https://github.com/nontaphatfirm)
-
 Note: This repository is for educational purposes. It is currently maintained solely by the author.
 ---
 
