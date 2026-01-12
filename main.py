@@ -317,6 +317,11 @@ class SitToStandLogic:
         
         cv2.putText(image, f"Active: {self.current_side}", (20, target_w - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
         
+        exit_text = "Press 'q' to Finish"
+        text_size = cv2.getTextSize(exit_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+        text_x = target_w - text_size[0] - 20
+        cv2.putText(image, exit_text, (text_x, new_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
         return image, current_angle, current_time_seconds, self.rep_quality_history
 
 # ==========================================
