@@ -12,7 +12,7 @@ Features:
     - 3D Biomechanical Angle Calculation (Knee, Hip, Ankle)
     - Automatic Repetition Counting & Form Feedback
     - Post-session Analytics Dashboard (Matplotlib)
-    - Memory Management & Safety Guards for Cloud Deployment
+    - Memory Management & Auto-Safety Guards (No manual reset required)
 """
 
 import os
@@ -361,15 +361,7 @@ class SitToStandLogic:
 # ==========================================
 st.set_page_config(page_title="STS Analyzer", layout="wide")
 
-# Sidebar for Monitoring
-with st.sidebar:
-    st.header("🔧 Tools")
-    st.write(f"RAM: {get_current_memory_mb():.1f} MB")
-    if st.button("🗑️ Clear RAM (Hard Reset)"):
-        st.cache_resource.clear()
-        st.session_state.clear()
-        nuclear_cleanup()
-        st.rerun()
+# No Sidebar Buttons as per requirement (Auto-Nuke is active)
 
 st.title("🩺 AI-Based STS Biomechanics Analyzer")
 st.markdown("**Web Version:** Optimized for iPad/iPhone/Android/PC")
@@ -383,7 +375,7 @@ if "webrtc_key" not in st.session_state:
 
 if "webcam_results" not in st.session_state: st.session_state["webcam_results"] = None
 
-# 🚨 Initial Safety Check
+# 🚨 Initial Safety Check (Auto-Reset if RAM is Critical)
 safe, mem_usage = check_memory_safe(1500)
 if not safe:
     st.error(f"⚠️ **System Reset triggered due to High Memory ({mem_usage:.1f} MB)**")
