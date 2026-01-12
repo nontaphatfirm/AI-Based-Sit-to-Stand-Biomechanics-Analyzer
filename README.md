@@ -77,35 +77,37 @@ The system uses rule-based logic to detect common biomechanical errors:
 
 ## 🛠️ Installation (For Developers)
 
-If you want to run the source code or modify it:
+**⚠️ Important Requirement:** This project is strictly compatible with **Python 3.10** and **MediaPipe 0.10.9**. (Newer Python versions like 3.11/3.12 are NOT supported by this MediaPipe version).
+
 
 1. **Clone the repository**
    ```bash
-   git clone [https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer.git](https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer.git)
+   git clone https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer.git
+
    cd AI-Based-Sit-to-Stand-Biomechanics-Analyzer
 
     ```
 
-2. **Create a Virtual Environment (Recommended)**
+
+2. **Setup Python 3.10 Environment**
+Make sure you have Python 3.10 installed on your system.
     ```bash
-    # Windows
-    python -m venv venv
+    # Create Virtual Environment with Python 3.10
+    py -3.10 -m venv venv
+
+    # Activate Environment
     .\venv\Scripts\activate
-
-    # Mac/Linux
-    python3 -m venv venv
-    source venv/bin/activate
-
+    
     ```
 
 
 3. **Install dependencies**
     ```bash
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
 
     ```
 
-*(Key libs: `opencv-python`, `mediapipe`, `numpy`, `matplotlib`, `psutil`)*
+
 4. **Run the application**
     ```bash
     python main.py
@@ -168,3 +170,4 @@ This project is licensed under the MIT License - see the [LICENSE](https://www.g
 ### 📧 Contact
 
 Project Link: [https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer](https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer)
+
