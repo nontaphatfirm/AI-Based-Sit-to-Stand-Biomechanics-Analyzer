@@ -9,7 +9,7 @@
 
 This tool performs real-time kinematic analysis of **Sit-to-Stand (STS)** movements using markerless pose estimation. It utilizes **MediaPipe BlazePose** to evaluate posture quality, count repetitions, and generate biomechanical reports without the need for wearable sensors. 
 
-**Now updated to v2.0.0 with 3D Biomechanics Logic & Auto-Side Detection!**
+**Now updated to v2.0 with 3D Biomechanics Logic & Auto-Side Detection!**
 
 ---
 
@@ -21,12 +21,12 @@ Web Version: Runs on iPad/iPhone/Android/PC (No installation required):
 
 ## 📥 Download Executable
 Run the application on Windows locally without installing Python:
-### **[⬇️ Download v2.0 (Windows .exe)](https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer/releases)**
+### **[⬇️ Download v2.0 (Windows .exe)](https://github.com/nontaphatfirm/AI-Based-Sit-to-Stand-Biomechanics-Analyzer/releases/tag/v2.0)**
 
 ---
 
 ## 🎬 Demo & Screenshots
-
+(Image From v1.0)
 | Real-time Analysis | Summary Dashboard |
 |:---:|:---:|
 | ![Analysis Demo](https://github.com/user-attachments/assets/d69cfd9a-d69f-4383-9138-ec054b69214c) | ![Graph Result](https://github.com/user-attachments/assets/3c1fb8c0-9447-4118-aa4e-e5333d1458e0) |
@@ -34,7 +34,7 @@ Run the application on Windows locally without installing Python:
 
 ---
 
-## 🚀 What's New in v2.0.0
+## 🚀 What's New in v2.0
 
 ### 🦵 Auto-Side Detection (Dual-Leg Support)
 * The system now analyzes **both left and right legs** simultaneously.
