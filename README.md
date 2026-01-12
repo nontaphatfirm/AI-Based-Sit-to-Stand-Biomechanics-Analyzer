@@ -119,42 +119,25 @@ Make sure you have Python 3.10 installed on your system.
 
 ## ⚙️ Technical Methodology
 
-The system operates on a sophisticated pipeline designed to transform raw video frames into actionable clinical insights.
+The system transforms raw video into clinical insights using a 4-step pipeline:
 
-### 1. Pose Estimation & Signal Processing
-* **Model Architecture:** Utilizes **MediaPipe BlazePose** (GHUM 3D), a high-fidelity topology model that predicts 33 body landmarks in real-time.
-* **Coordinate Systems:**
-    * **2D Normalized Coordinates $(x, y)$:** Used for UI overlay and posture metrics relative to the camera frame (e.g., Stance Width).
-    * **3D World Coordinates $(x, y, z)$:** Used for angular kinematics to ensure **perspective invariance**, allowing accurate analysis even from oblique camera angles (45°).
-* **Signal Smoothing:** A **Moving Average Filter** (Window Size $N=7$) is applied to the angular data stream to eliminate jitter and sensor noise.
+### 1. 3D Pose Estimation
+We use **MediaPipe BlazePose** to track 33 body landmarks. Unlike basic 2D tools, we utilize **3D World Coordinates** $(x, y, z)$ for all angle calculations. This ensures accurate results even if the camera is placed at an oblique angle (e.g., 45° side view).
 
-### 2. Algorithmic Side Selection (Auto-Side Detection)
-To support unconstrained usage, the system automatically determines the "Active Side" (Left vs. Right) using a heuristic scoring algorithm:
-$$Score_{side} = (L_{thigh} \times 3.0) + V_{avg}$$
-Where:
-* $L_{thigh}$: Euclidean distance between Hip and Knee in 2D space (Projected length).
-* $V_{avg}$: Average visibility score of Hip and Knee landmarks provided by the model confidence.
-* **Logic:** The side with the higher score is selected as the active tracking side for the session.
+### 2. Auto-Side Detection
+The system automatically determines the "Active Side" (Left vs. Right) by comparing:
+* **Visibility Confidence:** Which leg is more clearly seen by the AI.
+* **Projected Limb Size:** Which leg appears larger/closer to the camera.
 
-### 3. Biomechanical Calculations
-The core kinematic analysis relies on vector geometry:
+### 3. Biomechanical Logic
+* **Knee Angle:** Calculated using 3D Vector Geometry (Dot Product) to measure flexion/extension.
+* **Torso Lean:** Measures the deviation of the trunk relative to the vertical gravity axis to detect unsafe leaning.
 
-* **Knee Flexion Angle ($\theta_{knee}$):** Calculated using the **3D Vector Dot Product** formula to measure the angle between the Thigh vector ($\vec{BA}$) and Shank vector ($\vec{BC}$):
-    $$\theta_{knee} = \arccos \left( \frac{\vec{BA} \cdot \vec{BC}}{||\vec{BA}|| \cdot ||\vec{BC}||} \right)$$
-    *(Where $B$=Knee, $A$=Hip, $C$=Ankle in 3D space)*
-
-* **Trunk Flexion (Torso Lean):** Calculated as the deviation of the trunk vector relative to the vertical gravity axis ($Y_{axis}$).
-
-### 4. Finite State Machine (FSM)
-Repetition counting is managed by a robust state machine to prevent false counts:
-
-1.  **State: STANDING** (Initial)
-    * Transition Condition: Knee Angle $> 165^\circ$
-2.  **State: SITTING** (Trigger Count)
-    * Transition Condition: Knee Angle $< 100^\circ$ AND Previous State was `STANDING`.
-    * **Action:** Increment Counter ($+1$).
-3.  **Error Handling (Debounce Logic):**
-    * Posture errors (e.g., Lean, Asymmetry) must persist for $> 3$ consecutive frames to trigger a warning, preventing flickering feedback.
+### 4. Smart Counting System
+Uses a **Finite State Machine (FSM)** to track repetition cycles:
+* **⬇️ Sit Phase:** Triggered when Knee Angle drops below **100°**.
+* **⬆️ Stand Phase:** Triggered when Knee Angle exceeds **165°**.
+* **🛡️ Debounce:** Filters out sensor noise to prevent double-counting.
 
 
 
@@ -182,6 +165,7 @@ SitToStand_Webcam_2026-01-12_14-30-00/
 * **Project Status:** Active Development (v2.0)
 * **GitHub:** [https://github.com/nontaphatfirm](https://github.com/nontaphatfirm)
 
+*Note: This repository is for educational purposes. It is currently maintained solely by the author.*
 ---
 
 ## 📄 License
