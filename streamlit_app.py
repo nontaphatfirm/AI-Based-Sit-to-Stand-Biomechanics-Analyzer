@@ -406,7 +406,7 @@ with st.expander("ℹ️ User Guide & Camera Setup (Click to open)", expanded=Fa
         * **Webcam:** 1. Click **"Allow"** for camera permission.
             2. Click **"SELECT DEVICE"** to choose your camera (Front/Back).
             3. Click **"START"** to begin.
-        * **Video File:** Upload a video (`.mp4`, max 200MB) recorded with the positioning above.
+        * **Video File:** Upload a video (`.mp4`, max 100MB) recorded with the positioning above.
         * **Troubleshooting:** If the webcam freezes or fails to load, please switch to a **Mobile Hotspot**.
         """
     )
